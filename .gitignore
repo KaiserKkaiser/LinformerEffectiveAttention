@@ -135,6 +135,7 @@ examples/runs
 # data
 /data
 serialization_dir
+glue_data/
 
 # emacs
 *.*~
@@ -145,3 +146,4 @@ debug.env
 
 #ctags
 tags
+
