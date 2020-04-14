@@ -244,17 +244,38 @@ class BertEffectiveSelfAttention(nn.Module):
         # seem a bit unusual, but is taken from the original Transformer paper.
         attention_probs = self.dropout(attention_probs)
 
+        ### Here, effective attention begins
+        ## Calculate Project_(LN(T))(A)
+        # Compute T
+        # TODO: Check if we need to do this transformation for T = VH
+        # T_trans = nn.Linear(self.all_head_size, self.all_head_size * self.num_attention_heads)
+        T = value_layer
+        # Make a QR decompotion of T; dim(Q)=d_s * d_s (orthogonal), dim(R) = d * d (upper trian)
+        Q, R =  torch.QR(T)
+        # Compute the rank of Q # TODO: Find a correct function
+        rank = torch.matrix_rank(Q)
+        # TODO: Extract A_0 and Q_0 from attention_probs and Q
+
+        # TODO: Matrix multiplication of A_0, Q_0, we get P
+        # Multiply each p_i to q_{r+1+i}
+        # Add up the columns in the resulting Q_0
+
+        # TODO: Compute projection of LN(T) by concating P(a_i)
+
+        # Compute the effective attention
+        effec_attention_probs = torch.sub(attention_probs, projection_attention)
+
         # Mask heads if we want to
         if head_mask is not None:
-            attention_probs = attention_probs * head_mask
+            effec_attention_probs = effec_attention_probs * head_mask
 
-        context_layer = torch.matmul(attention_probs, value_layer) # value_layer: V in the paper
+        context_layer = torch.matmul(effec_attention_probs, value_layer) # value_layer: V in the paper
 
         context_layer = context_layer.permute(0, 2, 1, 3).contiguous()
         new_context_layer_shape = context_layer.size()[:-2] + (self.all_head_size,)
         context_layer = context_layer.view(*new_context_layer_shape)
 
-        outputs = (context_layer, attention_probs) if self.output_attentions else (context_layer,)
+        outputs = (context_layer, effec_attention_probs) if self.output_attentions else (context_layer,)
         return outputs
     
 
