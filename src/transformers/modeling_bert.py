@@ -247,21 +247,22 @@ class BertEffectiveSelfAttention(nn.Module):
         ### Here, effective attention begins
         ## Calculate Project_(LN(T))(A)
         # Compute T
-        # TODO: Check if we need to do this transformation for T = VH
-        # T_trans = nn.Linear(self.all_head_size, self.all_head_size * self.num_attention_heads)
         T = value_layer
-        # Make a QR decompotion of T; dim(Q)=d_s * d_s (orthogonal), dim(R) = d * d (upper trian)
-        Q, R =  torch.QR(T)
-        # Compute the rank of Q # TODO: Find a correct function
-        rank = torch.matrix_rank(Q)
-        # TODO: Extract A_0 and Q_0 from attention_probs and Q
-
-        # TODO: Matrix multiplication of A_0, Q_0, we get P
-        # Multiply each p_i to q_{r+1+i}
-        # Add up the columns in the resulting Q_0
-
-        # TODO: Compute projection of LN(T) by concating P(a_i)
-
+        # Make a SVD of T, U(dimension: [batch_size, hidden_size, hidden_size], [d_s, d_s]
+        # S(dimension: square, and is of min(hidden_size, all_head_size), min(d_s, d))
+        U, S, V = torch.Tensor.svd(T, some=False, compute_uv=True)
+        # Find the basis of LN(T), null_space dimension: [batch_size, hidden_size, hidden_size - rank], [d_s, d_s-r]
+        basis_start_index = torch.sum(S>0, dtype=int)
+        null_space = U[:, basis_start_index:]
+        # TODO: Need to make sure if this is applicable to batches; Need to make sure the start_index is correct
+        # Multiply attention with null_space, dimension: [batch_size, hidden_size, hidden_size - rank], [d_s, d_s-r]
+        B = torch.matmul(attention_probs, null_space)
+        # Transpose B [batch_size, hidden_size - rank, hidden_size]
+        transpose_B = torch.transpose(B, -1, -2)
+        # Multiply null_space and transposed B [batch_size, hidden_size, hiddensize]
+        projection_attention = torch.matmul(null_space, transpose_B)
+        # Then do tranpose for projection of LN(T)
+        projection_attention = torch.tranpose(projection_attention, -1, -2)
         # Compute the effective attention
         effec_attention_probs = torch.sub(attention_probs, projection_attention)
 
