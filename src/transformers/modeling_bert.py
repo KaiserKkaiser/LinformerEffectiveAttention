@@ -251,8 +251,10 @@ class BertEffectiveSelfAttention(nn.Module):
         # Make a SVD of T, U(dimension: [batch_size, hidden_size, hidden_size], [d_s, d_s]
         # S(dimension: square, and is of min(hidden_size, all_head_size), min(d_s, d))
         U, S, V = torch.Tensor.svd(T, some=False, compute_uv=True)
+        # Find the bound of S, when S value less than bound, we treat it as a 0
+        bound = torch.finfo(S.dtype).eps * max(U.shape[1], V.shape[1])
         # Find the basis of LN(T), null_space dimension: [batch_size, hidden_size, hidden_size - rank], [d_s, d_s-r]
-        basis_start_index = torch.sum(S>0, dtype=int)
+        basis_start_index = torch.sum(S>bound, dtype=int)
         null_space = U[:, basis_start_index:]
         # TODO: Need to make sure if this is applicable to batches; Need to make sure the start_index is correct
         # Multiply attention with null_space, dimension: [batch_size, hidden_size, hidden_size - rank], [d_s, d_s-r]
