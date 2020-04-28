@@ -24,6 +24,7 @@ import tensorflow as tf
 from .configuration_bert import BertConfig
 from .file_utils import MULTIPLE_CHOICE_DUMMY_INPUTS, add_start_docstrings, add_start_docstrings_to_callable
 from .modeling_tf_utils import TFPreTrainedModel, get_initializer, keras_serializable, shape_list
+from .tokenization_utils import BatchEncoding
 
 
 logger = logging.getLogger(__name__)
@@ -514,7 +515,7 @@ class TFBertMainLayer(tf.keras.layers.Layer):
             head_mask = inputs[4] if len(inputs) > 4 else head_mask
             inputs_embeds = inputs[5] if len(inputs) > 5 else inputs_embeds
             assert len(inputs) <= 6, "Too many inputs."
-        elif isinstance(inputs, dict):
+        elif isinstance(inputs, (dict, BatchEncoding)):
             input_ids = inputs.get("input_ids")
             attention_mask = inputs.get("attention_mask", attention_mask)
             token_type_ids = inputs.get("token_type_ids", token_type_ids)
@@ -1147,10 +1148,16 @@ class TFBertForQuestionAnswering(TFBertPreTrainedModel):
         from transformers import BertTokenizer, TFBertForQuestionAnswering
 
         tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
-        model = TFBertForQuestionAnswering.from_pretrained('bert-base-uncased')
-        input_ids = tf.constant(tokenizer.encode("Hello, my dog is cute", add_special_tokens=True))[None, :]  # Batch size 1
-        outputs = model(input_ids)
-        start_scores, end_scores = outputs[:2]
+        model = TFBertForQuestionAnswering.from_pretrained('bert-large-uncased-whole-word-masking-finetuned-squad')
+
+        question, text = "Who was Jim Henson?", "Jim Henson was a nice puppet"
+        encoding = tokenizer.encode_plus(question, text)
+        input_ids, token_type_ids = encoding["input_ids"], encoding["token_type_ids"]
+        start_scores, end_scores = model(tf.constant(input_ids)[None, :], token_type_ids=tf.constant(token_type_ids)[None, :])
+
+        all_tokens = tokenizer.convert_ids_to_tokens(input_ids)
+        answer = ' '.join(all_tokens[tf.math.argmax(tf.squeeze(start_scores)) : tf.math.argmax(tf.squeeze(end_scores))+1])
+        assert answer == "a nice puppet"
 
         """
         outputs = self.bert(inputs, **kwargs)

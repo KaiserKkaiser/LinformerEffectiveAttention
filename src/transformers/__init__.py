@@ -2,7 +2,7 @@
 # There's no way to ignore "F401 '...' imported but unused" warnings in this
 # module, but to preserve other warnings. So, don't check this module at all.
 
-__version__ = "2.7.0"
+__version__ = "2.8.0"
 
 # Work around to update TensorFlow's absl.logging threshold which alters the
 # default Python logging output behavior when present.
@@ -31,6 +31,8 @@ from .benchmark_utils import (
     start_memory_tracing,
     stop_memory_tracing,
 )
+
+# Configurations
 from .configuration_albert import ALBERT_PRETRAINED_CONFIG_ARCHIVE_MAP, AlbertConfig
 from .configuration_auto import ALL_PRETRAINED_CONFIG_ARCHIVE_MAP, CONFIG_MAPPING, AutoConfig
 from .configuration_bart import BartConfig
@@ -38,6 +40,7 @@ from .configuration_bert import BERT_PRETRAINED_CONFIG_ARCHIVE_MAP, BertConfig
 from .configuration_camembert import CAMEMBERT_PRETRAINED_CONFIG_ARCHIVE_MAP, CamembertConfig
 from .configuration_ctrl import CTRL_PRETRAINED_CONFIG_ARCHIVE_MAP, CTRLConfig
 from .configuration_distilbert import DISTILBERT_PRETRAINED_CONFIG_ARCHIVE_MAP, DistilBertConfig
+from .configuration_electra import ELECTRA_PRETRAINED_CONFIG_ARCHIVE_MAP, ElectraConfig
 from .configuration_flaubert import FLAUBERT_PRETRAINED_CONFIG_ARCHIVE_MAP, FlaubertConfig
 from .configuration_gpt2 import GPT2_PRETRAINED_CONFIG_ARCHIVE_MAP, GPT2Config
 from .configuration_mmbt import MMBTConfig
@@ -45,8 +48,6 @@ from .configuration_openai import OPENAI_GPT_PRETRAINED_CONFIG_ARCHIVE_MAP, Open
 from .configuration_roberta import ROBERTA_PRETRAINED_CONFIG_ARCHIVE_MAP, RobertaConfig
 from .configuration_t5 import T5_PRETRAINED_CONFIG_ARCHIVE_MAP, T5Config
 from .configuration_transfo_xl import TRANSFO_XL_PRETRAINED_CONFIG_ARCHIVE_MAP, TransfoXLConfig
-
-# Configurations
 from .configuration_utils import PretrainedConfig
 from .configuration_xlm import XLM_PRETRAINED_CONFIG_ARCHIVE_MAP, XLMConfig
 from .configuration_xlm_roberta import XLM_ROBERTA_PRETRAINED_CONFIG_ARCHIVE_MAP, XLMRobertaConfig
@@ -87,6 +88,7 @@ from .file_utils import (
     is_tf_available,
     is_torch_available,
 )
+from .hf_argparser import HfArgumentParser
 
 # Model Cards
 from .modelcard import ModelCard
@@ -115,30 +117,33 @@ from .pipelines import (
     QuestionAnsweringPipeline,
     SummarizationPipeline,
     TextClassificationPipeline,
+    TextGenerationPipeline,
     TokenClassificationPipeline,
     TranslationPipeline,
     pipeline,
 )
+
+# Tokenizers
 from .tokenization_albert import AlbertTokenizer
 from .tokenization_auto import TOKENIZER_MAPPING, AutoTokenizer
-from .tokenization_bart import BartTokenizer
+from .tokenization_bart import BartTokenizer, MBartTokenizer
 from .tokenization_bert import BasicTokenizer, BertTokenizer, BertTokenizerFast, WordpieceTokenizer
 from .tokenization_bert_japanese import BertJapaneseTokenizer, CharacterTokenizer, MecabTokenizer
 from .tokenization_camembert import CamembertTokenizer
 from .tokenization_ctrl import CTRLTokenizer
 from .tokenization_distilbert import DistilBertTokenizer, DistilBertTokenizerFast
+from .tokenization_electra import ElectraTokenizer, ElectraTokenizerFast
 from .tokenization_flaubert import FlaubertTokenizer
 from .tokenization_gpt2 import GPT2Tokenizer, GPT2TokenizerFast
 from .tokenization_openai import OpenAIGPTTokenizer, OpenAIGPTTokenizerFast
 from .tokenization_roberta import RobertaTokenizer, RobertaTokenizerFast
 from .tokenization_t5 import T5Tokenizer
 from .tokenization_transfo_xl import TransfoXLCorpus, TransfoXLTokenizer, TransfoXLTokenizerFast
-
-# Tokenizers
 from .tokenization_utils import PreTrainedTokenizer
 from .tokenization_xlm import XLMTokenizer
 from .tokenization_xlm_roberta import XLMRobertaTokenizer
 from .tokenization_xlnet import SPIECE_UNDERLINE, XLNetTokenizer
+from .training_args import TrainingArguments
 
 
 logger = logging.getLogger(__name__)  # pylint: disable=invalid-name
@@ -158,6 +163,7 @@ if is_torch_available():
         AutoModelForQuestionAnswering,
         AutoModelWithLMHead,
         AutoModelForTokenClassification,
+        AutoModelForMultipleChoice,
         ALL_PRETRAINED_MODEL_ARCHIVE_MAP,
         MODEL_MAPPING,
         MODEL_FOR_PRETRAINING_MAPPING,
@@ -165,6 +171,7 @@ if is_torch_available():
         MODEL_FOR_SEQUENCE_CLASSIFICATION_MAPPING,
         MODEL_FOR_QUESTION_ANSWERING_MAPPING,
         MODEL_FOR_TOKEN_CLASSIFICATION_MAPPING,
+        MODEL_FOR_MULTIPLE_CHOICE_MAPPING,
     )
 
     from .modeling_bert import (
@@ -297,6 +304,15 @@ if is_torch_available():
         FLAUBERT_PRETRAINED_MODEL_ARCHIVE_MAP,
     )
 
+    from .modeling_electra import (
+        ElectraForPreTraining,
+        ElectraForMaskedLM,
+        ElectraForTokenClassification,
+        ElectraModel,
+        load_tf_weights_in_electra,
+        ELECTRA_PRETRAINED_MODEL_ARCHIVE_MAP,
+    )
+
     # Optimization
     from .optimization import (
         AdamW,
@@ -307,6 +323,10 @@ if is_torch_available():
         get_linear_schedule_with_warmup,
     )
 
+    # Trainer
+    from .trainer import Trainer, set_seed, torch_distributed_zero_first, EvalPrediction
+    from .data.data_collator import DefaultDataCollator, DataCollator, DataCollatorForLanguageModeling
+    from .data.datasets import GlueDataset, TextDataset, LineByLineTextDataset, GlueDataTrainingArguments
 
 # TensorFlow
 if is_tf_available():
@@ -411,6 +431,7 @@ if is_tf_available():
         TFRobertaForMaskedLM,
         TFRobertaForSequenceClassification,
         TFRobertaForTokenClassification,
+        TFRobertaForQuestionAnswering,
         TF_ROBERTA_PRETRAINED_MODEL_ARCHIVE_MAP,
     )
 
@@ -453,6 +474,7 @@ if is_tf_available():
         TFAlbertModel,
         TFAlbertForMaskedLM,
         TFAlbertForSequenceClassification,
+        TFAlbertForQuestionAnswering,
         TF_ALBERT_PRETRAINED_MODEL_ARCHIVE_MAP,
     )
 
@@ -461,6 +483,15 @@ if is_tf_available():
         TFT5Model,
         TFT5ForConditionalGeneration,
         TF_T5_PRETRAINED_MODEL_ARCHIVE_MAP,
+    )
+
+    from .modeling_tf_electra import (
+        TFElectraPreTrainedModel,
+        TFElectraModel,
+        TFElectraForPreTraining,
+        TFElectraForMaskedLM,
+        TFElectraForTokenClassification,
+        TF_ELECTRA_PRETRAINED_MODEL_ARCHIVE_MAP,
     )
 
     # Optimization

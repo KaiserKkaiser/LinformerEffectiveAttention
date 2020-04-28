@@ -26,6 +26,7 @@ from .configuration_auto import (
     CamembertConfig,
     CTRLConfig,
     DistilBertConfig,
+    ElectraConfig,
     FlaubertConfig,
     GPT2Config,
     OpenAIGPTConfig,
@@ -54,6 +55,7 @@ from .modeling_bart import (
 from .modeling_bert import (
     BERT_PRETRAINED_MODEL_ARCHIVE_MAP,
     BertForMaskedLM,
+    BertForMultipleChoice,
     BertForPreTraining,
     BertForQuestionAnswering,
     BertForSequenceClassification,
@@ -63,6 +65,7 @@ from .modeling_bert import (
 from .modeling_camembert import (
     CAMEMBERT_PRETRAINED_MODEL_ARCHIVE_MAP,
     CamembertForMaskedLM,
+    CamembertForMultipleChoice,
     CamembertForSequenceClassification,
     CamembertForTokenClassification,
     CamembertModel,
@@ -76,6 +79,13 @@ from .modeling_distilbert import (
     DistilBertForTokenClassification,
     DistilBertModel,
 )
+from .modeling_electra import (
+    ELECTRA_PRETRAINED_MODEL_ARCHIVE_MAP,
+    ElectraForMaskedLM,
+    ElectraForPreTraining,
+    ElectraForTokenClassification,
+    ElectraModel,
+)
 from .modeling_flaubert import (
     FLAUBERT_PRETRAINED_MODEL_ARCHIVE_MAP,
     FlaubertForQuestionAnsweringSimple,
@@ -88,6 +98,7 @@ from .modeling_openai import OPENAI_GPT_PRETRAINED_MODEL_ARCHIVE_MAP, OpenAIGPTL
 from .modeling_roberta import (
     ROBERTA_PRETRAINED_MODEL_ARCHIVE_MAP,
     RobertaForMaskedLM,
+    RobertaForMultipleChoice,
     RobertaForQuestionAnswering,
     RobertaForSequenceClassification,
     RobertaForTokenClassification,
@@ -106,12 +117,14 @@ from .modeling_xlm import (
 from .modeling_xlm_roberta import (
     XLM_ROBERTA_PRETRAINED_MODEL_ARCHIVE_MAP,
     XLMRobertaForMaskedLM,
+    XLMRobertaForMultipleChoice,
     XLMRobertaForSequenceClassification,
     XLMRobertaForTokenClassification,
     XLMRobertaModel,
 )
 from .modeling_xlnet import (
     XLNET_PRETRAINED_MODEL_ARCHIVE_MAP,
+    XLNetForMultipleChoice,
     XLNetForQuestionAnsweringSimple,
     XLNetForSequenceClassification,
     XLNetForTokenClassification,
@@ -141,6 +154,7 @@ ALL_PRETRAINED_MODEL_ARCHIVE_MAP = dict(
         T5_PRETRAINED_MODEL_ARCHIVE_MAP,
         FLAUBERT_PRETRAINED_MODEL_ARCHIVE_MAP,
         XLM_ROBERTA_PRETRAINED_MODEL_ARCHIVE_MAP,
+        ELECTRA_PRETRAINED_MODEL_ARCHIVE_MAP,
     ]
     for key, value, in pretrained_map.items()
 )
@@ -162,6 +176,7 @@ MODEL_MAPPING = OrderedDict(
         (FlaubertConfig, FlaubertModel),
         (XLMConfig, XLMModel),
         (CTRLConfig, CTRLModel),
+        (ElectraConfig, ElectraModel),
     ]
 )
 
@@ -182,6 +197,7 @@ MODEL_FOR_PRETRAINING_MAPPING = OrderedDict(
         (FlaubertConfig, FlaubertWithLMHeadModel),
         (XLMConfig, XLMWithLMHeadModel),
         (CTRLConfig, CTRLLMHeadModel),
+        (ElectraConfig, ElectraForPreTraining),
     ]
 )
 
@@ -202,6 +218,7 @@ MODEL_WITH_LM_HEAD_MAPPING = OrderedDict(
         (FlaubertConfig, FlaubertWithLMHeadModel),
         (XLMConfig, XLMWithLMHeadModel),
         (CTRLConfig, CTRLLMHeadModel),
+        (ElectraConfig, ElectraForMaskedLM),
     ]
 )
 
@@ -242,11 +259,23 @@ MODEL_FOR_TOKEN_CLASSIFICATION_MAPPING = OrderedDict(
         (BertConfig, BertForTokenClassification),
         (XLNetConfig, XLNetForTokenClassification),
         (AlbertConfig, AlbertForTokenClassification),
+        (ElectraConfig, ElectraForTokenClassification),
     ]
 )
 
 
-class AutoModel(object):
+MODEL_FOR_MULTIPLE_CHOICE_MAPPING = OrderedDict(
+    [
+        (CamembertConfig, CamembertForMultipleChoice),
+        (XLMRobertaConfig, XLMRobertaForMultipleChoice),
+        (RobertaConfig, RobertaForMultipleChoice),
+        (BertConfig, BertForMultipleChoice),
+        (XLNetConfig, XLNetForMultipleChoice),
+    ]
+)
+
+
+class AutoModel:
     r"""
         :class:`~transformers.AutoModel` is a generic model class
         that will be instantiated as one of the base model classes of the library
@@ -281,7 +310,8 @@ class AutoModel(object):
                 - isInstance of `transfo-xl` configuration class: :class:`~transformers.TransfoXLModel` (Transformer-XL model)
                 - isInstance of `xlnet` configuration class: :class:`~transformers.XLNetModel` (XLNet model)
                 - isInstance of `xlm` configuration class: :class:`~transformers.XLMModel` (XLM model)
-                - isInstance of `flaubert` configuration class: :class:`~transformers.FlaubertModel` (XLM model)
+                - isInstance of `flaubert` configuration class: :class:`~transformers.FlaubertModel` (Flaubert model)
+                - isInstance of `electra` configuration class: :class:`~transformers.ElectraModel` (Electra model)
 
         Examples::
 
@@ -322,7 +352,8 @@ class AutoModel(object):
             - contains `xlnet`: :class:`~transformers.XLNetModel` (XLNet model)
             - contains `xlm`: :class:`~transformers.XLMModel` (XLM model)
             - contains `ctrl`: :class:`~transformers.CTRLModel` (Salesforce CTRL  model)
-            - contains `flaubert`: :class:`~transformers.Flaubert` (Flaubert  model)
+            - contains `flaubert`: :class:`~transformers.FlaubertModel` (Flaubert  model)
+            - contains `electra`: :class:`~transformers.ElectraModel` (Electra  model)
 
             The model is set in evaluation mode by default using `model.eval()` (Dropout modules are deactivated)
             To train the model, you should first set it back in training mode with `model.train()`
@@ -395,7 +426,7 @@ class AutoModel(object):
         )
 
 
-class AutoModelForPreTraining(object):
+class AutoModelForPreTraining:
     r"""
         :class:`~transformers.AutoModelForPreTraining` is a generic model class
         that will be instantiated as one of the model classes of the library -with the architecture used for pretraining this model– when created with the `AutoModelForPreTraining.from_pretrained(pretrained_model_name_or_path)`
@@ -430,6 +461,7 @@ class AutoModelForPreTraining(object):
                 - isInstance of `xlnet` configuration class: :class:`~transformers.XLNetLMHeadModel` (XLNet model)
                 - isInstance of `xlm` configuration class: :class:`~transformers.XLMWithLMHeadModel` (XLM model)
                 - isInstance of `flaubert` configuration class: :class:`~transformers.FlaubertWithLMHeadModel` (Flaubert model)
+                - isInstance of `electra` configuration class: :class:`~transformers.ElectraForPreTraining` (Electra model)
 
         Examples::
 
@@ -470,6 +502,7 @@ class AutoModelForPreTraining(object):
             - contains `xlm`: :class:`~transformers.XLMWithLMHeadModel` (XLM model)
             - contains `ctrl`: :class:`~transformers.CTRLLMHeadModel` (Salesforce CTRL model)
             - contains `flaubert`: :class:`~transformers.FlaubertWithLMHeadModel` (Flaubert model)
+            - contains `electra`: :class:`~transformers.ElectraForPreTraining` (Electra model)
 
         The model is set in evaluation mode by default using `model.eval()` (Dropout modules are deactivated)
         To train the model, you should first set it back in training mode with `model.train()`
@@ -535,7 +568,7 @@ class AutoModelForPreTraining(object):
         )
 
 
-class AutoModelWithLMHead(object):
+class AutoModelWithLMHead:
     r"""
         :class:`~transformers.AutoModelWithLMHead` is a generic model class
         that will be instantiated as one of the language modeling model classes of the library
@@ -571,6 +604,7 @@ class AutoModelWithLMHead(object):
                 - isInstance of `xlnet` configuration class: :class:`~transformers.XLNetLMHeadModel` (XLNet model)
                 - isInstance of `xlm` configuration class: :class:`~transformers.XLMWithLMHeadModel` (XLM model)
                 - isInstance of `flaubert` configuration class: :class:`~transformers.FlaubertWithLMHeadModel` (Flaubert model)
+                - isInstance of `electra` configuration class: :class:`~transformers.ElectraForMaskedLM` (Electra model)
 
         Examples::
 
@@ -612,6 +646,7 @@ class AutoModelWithLMHead(object):
             - contains `xlm`: :class:`~transformers.XLMWithLMHeadModel` (XLM model)
             - contains `ctrl`: :class:`~transformers.CTRLLMHeadModel` (Salesforce CTRL model)
             - contains `flaubert`: :class:`~transformers.FlaubertWithLMHeadModel` (Flaubert model)
+            - contains `electra`: :class:`~transformers.ElectraForMaskedLM` (Electra model)
 
         The model is set in evaluation mode by default using `model.eval()` (Dropout modules are deactivated)
         To train the model, you should first set it back in training mode with `model.train()`
@@ -677,7 +712,7 @@ class AutoModelWithLMHead(object):
         )
 
 
-class AutoModelForSequenceClassification(object):
+class AutoModelForSequenceClassification:
     r"""
         :class:`~transformers.AutoModelForSequenceClassification` is a generic model class
         that will be instantiated as one of the sequence classification model classes of the library
@@ -824,7 +859,7 @@ class AutoModelForSequenceClassification(object):
         )
 
 
-class AutoModelForQuestionAnswering(object):
+class AutoModelForQuestionAnswering:
     r"""
         :class:`~transformers.AutoModelForQuestionAnswering` is a generic model class
         that will be instantiated as one of the question answering model classes of the library
@@ -998,6 +1033,7 @@ class AutoModelForTokenClassification:
                 - isInstance of `xlnet` configuration class: :class:`~transformers.XLNetModelForTokenClassification` (XLNet model)
                 - isInstance of `camembert` configuration class: :class:`~transformers.CamembertModelForTokenClassification` (Camembert model)
                 - isInstance of `roberta` configuration class: :class:`~transformers.RobertaModelForTokenClassification` (Roberta model)
+                - isInstance of `electra` configuration class: :class:`~transformers.ElectraForTokenClassification` (Electra model)
 
         Examples::
 
@@ -1035,6 +1071,7 @@ class AutoModelForTokenClassification:
             - contains `bert`: :class:`~transformers.BertForTokenClassification` (Bert model)
             - contains `xlnet`: :class:`~transformers.XLNetForTokenClassification` (XLNet model)
             - contains `roberta`: :class:`~transformers.RobertaForTokenClassification` (Roberta model)
+            - contains `electra`: :class:`~transformers.ElectraForTokenClassification` (Electra model)
 
         The model is set in evaluation mode by default using `model.eval()` (Dropout modules are deactivated)
         To train the model, you should first set it back in training mode with `model.train()`
@@ -1103,5 +1140,57 @@ class AutoModelForTokenClassification:
                 config.__class__,
                 cls.__name__,
                 ", ".join(c.__name__ for c in MODEL_FOR_TOKEN_CLASSIFICATION_MAPPING.keys()),
+            )
+        )
+
+
+class AutoModelForMultipleChoice:
+    r"""
+        :class:`~transformers.AutoModelForMultipleChoice` is a generic model class
+        that will be instantiated as one of the multiple choice model classes of the library
+        when created with the `AutoModelForMultipleChoice.from_pretrained(pretrained_model_name_or_path)`
+        class method.
+
+        This class cannot be instantiated using `__init__()` (throws an error).
+    """
+
+    def __init__(self):
+        raise EnvironmentError(
+            "AutoModelForMultipleChoice is designed to be instantiated "
+            "using the `AutoModelForMultipleChoice.from_pretrained(pretrained_model_name_or_path)` or "
+            "`AutoModelForMultipleChoice.from_config(config)` methods."
+        )
+
+    @classmethod
+    def from_config(cls, config):
+        for config_class, model_class in MODEL_FOR_MULTIPLE_CHOICE_MAPPING.items():
+            if isinstance(config, config_class):
+                return model_class(config)
+
+        raise ValueError(
+            "Unrecognized configuration class {} for this kind of AutoModel: {}.\n"
+            "Model type should be one of {}.".format(
+                config.__class__,
+                cls.__name__,
+                ", ".join(c.__name__ for c in MODEL_FOR_MULTIPLE_CHOICE_MAPPING.keys()),
+            )
+        )
+
+    @classmethod
+    def from_pretrained(cls, pretrained_model_name_or_path, *model_args, **kwargs):
+        config = kwargs.pop("config", None)
+        if not isinstance(config, PretrainedConfig):
+            config = AutoConfig.from_pretrained(pretrained_model_name_or_path, **kwargs)
+
+        for config_class, model_class in MODEL_FOR_MULTIPLE_CHOICE_MAPPING.items():
+            if isinstance(config, config_class):
+                return model_class.from_pretrained(pretrained_model_name_or_path, *model_args, config=config, **kwargs)
+
+        raise ValueError(
+            "Unrecognized configuration class {} for this kind of AutoModel: {}.\n"
+            "Model type should be one of {}.".format(
+                config.__class__,
+                cls.__name__,
+                ", ".join(c.__name__ for c in MODEL_FOR_MULTIPLE_CHOICE_MAPPING.keys()),
             )
         )

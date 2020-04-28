@@ -30,6 +30,7 @@ from .modeling_tf_xlm import (
     get_masks,
     shape_list,
 )
+from .tokenization_utils import BatchEncoding
 
 
 logger = logging.getLogger(__name__)
@@ -106,13 +107,13 @@ class TFFlaubertModel(TFXLMModel):
     pretrained_model_archive_map = TF_FLAUBERT_PRETRAINED_MODEL_ARCHIVE_MAP
 
     def __init__(self, config, *inputs, **kwargs):
-        super(TFFlaubertModel, self).__init__(config, *inputs, **kwargs)
+        super().__init__(config, *inputs, **kwargs)
         self.transformer = TFFlaubertMainLayer(config, name="transformer")
 
 
 class TFFlaubertMainLayer(TFXLMMainLayer):
     def __init__(self, config, *inputs, **kwargs):
-        super(TFFlaubertMainLayer, self).__init__(config, *inputs, **kwargs)
+        super().__init__(config, *inputs, **kwargs)
         self.layerdrop = getattr(config, "layerdrop", 0.0)
         self.pre_norm = getattr(config, "pre_norm", False)
 
@@ -141,7 +142,7 @@ class TFFlaubertMainLayer(TFXLMMainLayer):
             head_mask = inputs[7] if len(inputs) > 7 else head_mask
             inputs_embeds = inputs[8] if len(inputs) > 8 else inputs_embeds
             assert len(inputs) <= 9, "Too many inputs."
-        elif isinstance(inputs, dict):
+        elif isinstance(inputs, (dict, BatchEncoding)):
             input_ids = inputs.get("input_ids")
             attention_mask = inputs.get("attention_mask", attention_mask)
             langs = inputs.get("langs", langs)
@@ -311,7 +312,7 @@ class TFFlaubertWithLMHeadModel(TFXLMWithLMHeadModel):
     pretrained_model_archive_map = TF_FLAUBERT_PRETRAINED_MODEL_ARCHIVE_MAP
 
     def __init__(self, config, *inputs, **kwargs):
-        super(TFFlaubertWithLMHeadModel, self).__init__(config, *inputs, **kwargs)
+        super().__init__(config, *inputs, **kwargs)
         self.transformer = TFFlaubertMainLayer(config, name="transformer")
 
 
@@ -325,5 +326,5 @@ class TFFlaubertForSequenceClassification(TFXLMForSequenceClassification):
     pretrained_model_archive_map = TF_FLAUBERT_PRETRAINED_MODEL_ARCHIVE_MAP
 
     def __init__(self, config, *inputs, **kwargs):
-        super(TFFlaubertForSequenceClassification, self).__init__(config, *inputs, **kwargs)
+        super().__init__(config, *inputs, **kwargs)
         self.transformer = TFFlaubertMainLayer(config, name="transformer")
