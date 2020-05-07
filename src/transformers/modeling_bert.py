@@ -28,6 +28,8 @@ from .activations import gelu, gelu_new, swish
 from .configuration_bert import BertConfig
 from .file_utils import add_start_docstrings, add_start_docstrings_to_callable
 from .modeling_utils import PreTrainedModel, prune_linear_layer
+# Debugging code
+import pdb
 
 
 logger = logging.getLogger(__name__)
@@ -238,8 +240,8 @@ class BertEffectiveSelfAttention(nn.Module):
             attention_scores = attention_scores + attention_mask
 
         # Normalize the attention scores to probabilities.
-        attention_probs = nn.Softmax(dim=-1)(attention_scores) # Matrix A in the paper
-
+        # attention_probs = nn.Softmax(dim=-1)(attention_scores) # Matrix A in the paper
+        attention_probs = attention_scores
         # This is actually dropping out entire tokens to attend to, which might
         # seem a bit unusual, but is taken from the original Transformer paper.
         attention_probs = self.dropout(attention_probs)
@@ -252,10 +254,11 @@ class BertEffectiveSelfAttention(nn.Module):
         # S(dimension: square, and is of min(hidden_size, all_head_size), min(d_s, d))
         U, S, V = torch.Tensor.svd(T, some=False, compute_uv=True)
         # Find the bound of S, when S value less than bound, we treat it as a 0
-        bound = torch.finfo(S.dtype).eps * max(U.shape[1], V.shape[1])
+        bound = torch.finfo(S.dtype).eps * max(U.shape[2], V.shape[2])
         # Find the basis of LN(T), null_space dimension: [batch_size, hidden_size, hidden_size - rank], [d_s, d_s-r]
-        basis_start_index = torch.sum(S>bound, dtype=int)
-        null_space = U[:, basis_start_index:]
+        basis_start_index = torch.sum(S[0][0]>bound, dtype=int)
+        null_space = U[:, :, :, basis_start_index:]
+        # pdb.set_trace()
         # TODO: Need to make sure if this is applicable to batches; Need to make sure the start_index is correct
         # Multiply attention with null_space, dimension: [batch_size, hidden_size, hidden_size - rank], [d_s, d_s-r]
         B = torch.matmul(attention_probs, null_space)
@@ -264,7 +267,7 @@ class BertEffectiveSelfAttention(nn.Module):
         # Multiply null_space and transposed B [batch_size, hidden_size, hiddensize]
         projection_attention = torch.matmul(null_space, transpose_B)
         # Then do tranpose for projection of LN(T)
-        projection_attention = torch.tranpose(projection_attention, -1, -2)
+        projection_attention = torch.transpose(projection_attention, -1, -2)
         # Compute the effective attention
         effec_attention_probs = torch.sub(attention_probs, projection_attention)
 
@@ -376,7 +379,7 @@ class BertSelfOutput(nn.Module):
 class BertAttention(nn.Module):
     def __init__(self, config):
         super().__init__()
-        self.self = BertSelfAttention(config)
+        self.self = BertEffectiveSelfAttention(config)
         self.output = BertSelfOutput(config)
         self.pruned_heads = set()
 
