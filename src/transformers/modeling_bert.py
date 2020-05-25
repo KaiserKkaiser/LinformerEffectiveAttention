@@ -376,7 +376,7 @@ class BertSelfOutput(nn.Module):
 class BertAttention(nn.Module):
     def __init__(self, config):
         super().__init__()
-        self.self = BertSelfAttention(config)
+        self.self = BertEffectiveSelfAttention(config)
         self.output = BertSelfOutput(config)
         self.pruned_heads = set()
 
