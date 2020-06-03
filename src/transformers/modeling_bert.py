@@ -29,6 +29,7 @@ from .configuration_bert import BertConfig
 from .file_utils import add_start_docstrings, add_start_docstrings_to_callable
 from .modeling_utils import PreTrainedModel, prune_linear_layer
 
+import pdb
 
 logger = logging.getLogger(__name__)
 
@@ -254,8 +255,9 @@ class BertEffectiveSelfAttention(nn.Module):
         # Find the bound of S, when S value less than bound, we treat it as a 0
         bound = torch.finfo(S.dtype).eps * max(U.shape[1], V.shape[1])
         # Find the basis of LN(T), null_space dimension: [batch_size, hidden_size, hidden_size - rank], [d_s, d_s-r]
-        basis_start_index = torch.sum(S>bound, dtype=int)
-        null_space = U[:, basis_start_index:]
+        basis_start_index = torch.max(torch.sum(S>bound, dtype=int, axis=2))
+        null_space = U[:, :, :, basis_start_index:]
+        # pdb.set_trace()
         # TODO: Need to make sure if this is applicable to batches; Need to make sure the start_index is correct
         # Multiply attention with null_space, dimension: [batch_size, hidden_size, hidden_size - rank], [d_s, d_s-r]
         B = torch.matmul(attention_probs, null_space)
@@ -264,7 +266,7 @@ class BertEffectiveSelfAttention(nn.Module):
         # Multiply null_space and transposed B [batch_size, hidden_size, hiddensize]
         projection_attention = torch.matmul(null_space, transpose_B)
         # Then do tranpose for projection of LN(T)
-        projection_attention = torch.tranpose(projection_attention, -1, -2)
+        projection_attention = torch.transpose(projection_attention, -1, -2)
         # Compute the effective attention
         effec_attention_probs = torch.sub(attention_probs, projection_attention)
 
@@ -478,6 +480,7 @@ class BertLayer(nn.Module):
             outputs = outputs + cross_attention_outputs[1:]  # add cross attentions if we output attention weights
 
         intermediate_output = self.intermediate(attention_output)
+        # pdb.set_trace()
         layer_output = self.output(intermediate_output, attention_output)
         outputs = (layer_output,) + outputs
         return outputs
@@ -635,7 +638,6 @@ BERT_START_DOCSTRING = r"""
     This model is a PyTorch `torch.nn.Module <https://pytorch.org/docs/stable/nn.html#torch.nn.Module>`_ sub-class.
     Use it as a regular PyTorch Module and refer to the PyTorch documentation for all matter related to general
     usage and behavior.
-
     Parameters:
         config (:class:`~transformers.BertConfig`): Model configuration class with all the parameters of the model.
             Initializing with a config file does not load the weights associated with the model, only the configuration.
@@ -646,28 +648,23 @@ BERT_INPUTS_DOCSTRING = r"""
     Args:
         input_ids (:obj:`torch.LongTensor` of shape :obj:`(batch_size, sequence_length)`):
             Indices of input sequence tokens in the vocabulary.
-
             Indices can be obtained using :class:`transformers.BertTokenizer`.
             See :func:`transformers.PreTrainedTokenizer.encode` and
             :func:`transformers.PreTrainedTokenizer.encode_plus` for details.
-
             `What are input IDs? <../glossary.html#input-ids>`__
         attention_mask (:obj:`torch.FloatTensor` of shape :obj:`(batch_size, sequence_length)`, `optional`, defaults to :obj:`None`):
             Mask to avoid performing attention on padding token indices.
             Mask values selected in ``[0, 1]``:
             ``1`` for tokens that are NOT MASKED, ``0`` for MASKED tokens.
-
             `What are attention masks? <../glossary.html#attention-mask>`__
         token_type_ids (:obj:`torch.LongTensor` of shape :obj:`(batch_size, sequence_length)`, `optional`, defaults to :obj:`None`):
             Segment token indices to indicate first and second portions of the inputs.
             Indices are selected in ``[0, 1]``: ``0`` corresponds to a `sentence A` token, ``1``
             corresponds to a `sentence B` token
-
             `What are token type IDs? <../glossary.html#token-type-ids>`_
         position_ids (:obj:`torch.LongTensor` of shape :obj:`(batch_size, sequence_length)`, `optional`, defaults to :obj:`None`):
             Indices of positions of each input sequence tokens in the position embeddings.
             Selected in the range ``[0, config.max_position_embeddings - 1]``.
-
             `What are position IDs? <../glossary.html#position-ids>`_
         head_mask (:obj:`torch.FloatTensor` of shape :obj:`(num_heads,)` or :obj:`(num_layers, num_heads)`, `optional`, defaults to :obj:`None`):
             Mask to nullify selected heads of the self-attention modules.
@@ -694,19 +691,15 @@ BERT_INPUTS_DOCSTRING = r"""
 )
 class BertModel(BertPreTrainedModel):
     """
-
     The model can behave as an encoder (with only self-attention) as well
     as a decoder, in which case a layer of cross-attention is added between
     the self-attention layers, following the architecture described in `Attention is all you need`_ by Ashish Vaswani,
     Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N. Gomez, Lukasz Kaiser and Illia Polosukhin.
-
     To behave as an decoder the model needs to be initialized with the
     :obj:`is_decoder` argument of the configuration set to :obj:`True`; an
     :obj:`encoder_hidden_states` is expected as an input to the forward pass.
-
     .. _`Attention is all you need`:
         https://arxiv.org/abs/1706.03762
-
     """
 
     def __init__(self, config):
@@ -755,35 +748,26 @@ class BertModel(BertPreTrainedModel):
             further processed by a Linear layer and a Tanh activation function. The Linear
             layer weights are trained from the next sentence prediction (classification)
             objective during pre-training.
-
             This output is usually *not* a good summary
             of the semantic content of the input, you're often better with averaging or pooling
             the sequence of hidden-states for the whole input sequence.
         hidden_states (:obj:`tuple(torch.FloatTensor)`, `optional`, returned when ``config.output_hidden_states=True``):
             Tuple of :obj:`torch.FloatTensor` (one for the output of the embeddings + one for the output of each layer)
             of shape :obj:`(batch_size, sequence_length, hidden_size)`.
-
             Hidden-states of the model at the output of each layer plus the initial embedding outputs.
         attentions (:obj:`tuple(torch.FloatTensor)`, `optional`, returned when ``config.output_attentions=True``):
             Tuple of :obj:`torch.FloatTensor` (one for each layer) of shape
             :obj:`(batch_size, num_heads, sequence_length, sequence_length)`.
-
             Attentions weights after the attention softmax, used to compute the weighted average in the self-attention
             heads.
-
     Examples::
-
         from transformers import BertModel, BertTokenizer
         import torch
-
         tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
         model = BertModel.from_pretrained('bert-base-uncased')
-
         input_ids = torch.tensor(tokenizer.encode("Hello, my dog is cute", add_special_tokens=True)).unsqueeze(0)  # Batch size 1
         outputs = model(input_ids)
-
         last_hidden_states = outputs[0]  # The last hidden-state is the first element of the output tuple
-
         """
 
         if input_ids is not None and inputs_embeds is not None:
@@ -885,7 +869,6 @@ class BertForPreTraining(BertPreTrainedModel):
             Indices should be in ``[0, 1]``.
             ``0`` indicates sequence B is a continuation of sequence A,
             ``1`` indicates sequence B is a random sequence.
-
     Returns:
         :obj:`tuple(torch.FloatTensor)` comprising various elements depending on the configuration (:class:`~transformers.BertConfig`) and inputs:
         loss (`optional`, returned when ``masked_lm_labels`` is provided) ``torch.FloatTensor`` of shape ``(1,)``:
@@ -898,29 +881,20 @@ class BertForPreTraining(BertPreTrainedModel):
         hidden_states (:obj:`tuple(torch.FloatTensor)`, `optional`, returned when :obj:`config.output_hidden_states=True`):
             Tuple of :obj:`torch.FloatTensor` (one for the output of the embeddings + one for the output of each layer)
             of shape :obj:`(batch_size, sequence_length, hidden_size)`.
-
             Hidden-states of the model at the output of each layer plus the initial embedding outputs.
         attentions (:obj:`tuple(torch.FloatTensor)`, `optional`, returned when ``config.output_attentions=True``):
             Tuple of :obj:`torch.FloatTensor` (one for each layer) of shape
             :obj:`(batch_size, num_heads, sequence_length, sequence_length)`.
-
             Attentions weights after the attention softmax, used to compute the weighted average in the self-attention
             heads.
-
-
     Examples::
-
         from transformers import BertTokenizer, BertForPreTraining
         import torch
-
         tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
         model = BertForPreTraining.from_pretrained('bert-base-uncased')
-
         input_ids = torch.tensor(tokenizer.encode("Hello, my dog is cute", add_special_tokens=True)).unsqueeze(0)  # Batch size 1
         outputs = model(input_ids)
-
         prediction_scores, seq_relationship_scores = outputs[:2]
-
         """
 
         outputs = self.bert(
@@ -987,7 +961,6 @@ class BertForMaskedLM(BertPreTrainedModel):
             Indices should be in ``[-100, 0, ..., config.vocab_size]`` (see ``input_ids`` docstring)
             Tokens with indices set to ``-100`` are ignored (masked), the loss is only computed for the tokens with labels
             in ``[0, ..., config.vocab_size]``
-
     Returns:
         :obj:`tuple(torch.FloatTensor)` comprising various elements depending on the configuration (:class:`~transformers.BertConfig`) and inputs:
         masked_lm_loss (`optional`, returned when ``masked_lm_labels`` is provided) ``torch.FloatTensor`` of shape ``(1,)``:
@@ -999,28 +972,20 @@ class BertForMaskedLM(BertPreTrainedModel):
         hidden_states (:obj:`tuple(torch.FloatTensor)`, `optional`, returned when ``config.output_hidden_states=True``):
             Tuple of :obj:`torch.FloatTensor` (one for the output of the embeddings + one for the output of each layer)
             of shape :obj:`(batch_size, sequence_length, hidden_size)`.
-
             Hidden-states of the model at the output of each layer plus the initial embedding outputs.
         attentions (:obj:`tuple(torch.FloatTensor)`, `optional`, returned when ``config.output_attentions=True``):
             Tuple of :obj:`torch.FloatTensor` (one for each layer) of shape
             :obj:`(batch_size, num_heads, sequence_length, sequence_length)`.
-
             Attentions weights after the attention softmax, used to compute the weighted average in the self-attention
             heads.
-
         Examples::
-
             from transformers import BertTokenizer, BertForMaskedLM
             import torch
-
             tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
             model = BertForMaskedLM.from_pretrained('bert-base-uncased')
-
             input_ids = torch.tensor(tokenizer.encode("Hello, my dog is cute", add_special_tokens=True)).unsqueeze(0)  # Batch size 1
             outputs = model(input_ids, masked_lm_labels=input_ids)
-
             loss, prediction_scores = outputs[:2]
-
         """
 
         outputs = self.bert(
@@ -1090,7 +1055,6 @@ class BertForNextSentencePrediction(BertPreTrainedModel):
             Indices should be in ``[0, 1]``.
             ``0`` indicates sequence B is a continuation of sequence A,
             ``1`` indicates sequence B is a random sequence.
-
     Returns:
         :obj:`tuple(torch.FloatTensor)` comprising various elements depending on the configuration (:class:`~transformers.BertConfig`) and inputs:
         loss (:obj:`torch.FloatTensor` of shape :obj:`(1,)`, `optional`, returned when :obj:`next_sentence_label` is provided):
@@ -1100,28 +1064,20 @@ class BertForNextSentencePrediction(BertPreTrainedModel):
         hidden_states (:obj:`tuple(torch.FloatTensor)`, `optional`, returned when ``config.output_hidden_states=True``):
             Tuple of :obj:`torch.FloatTensor` (one for the output of the embeddings + one for the output of each layer)
             of shape :obj:`(batch_size, sequence_length, hidden_size)`.
-
             Hidden-states of the model at the output of each layer plus the initial embedding outputs.
         attentions (:obj:`tuple(torch.FloatTensor)`, `optional`, returned when ``config.output_attentions=True``):
             Tuple of :obj:`torch.FloatTensor` (one for each layer) of shape
             :obj:`(batch_size, num_heads, sequence_length, sequence_length)`.
-
             Attentions weights after the attention softmax, used to compute the weighted average in the self-attention
             heads.
-
     Examples::
-
         from transformers import BertTokenizer, BertForNextSentencePrediction
         import torch
-
         tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
         model = BertForNextSentencePrediction.from_pretrained('bert-base-uncased')
-
         input_ids = torch.tensor(tokenizer.encode("Hello, my dog is cute", add_special_tokens=True)).unsqueeze(0)  # Batch size 1
         outputs = model(input_ids)
-
         seq_relationship_scores = outputs[0]
-
         """
 
         outputs = self.bert(
@@ -1179,7 +1135,6 @@ class BertForSequenceClassification(BertPreTrainedModel):
             Indices should be in :obj:`[0, ..., config.num_labels - 1]`.
             If :obj:`config.num_labels == 1` a regression loss is computed (Mean-Square loss),
             If :obj:`config.num_labels > 1` a classification loss is computed (Cross-Entropy).
-
     Returns:
         :obj:`tuple(torch.FloatTensor)` comprising various elements depending on the configuration (:class:`~transformers.BertConfig`) and inputs:
         loss (:obj:`torch.FloatTensor` of shape :obj:`(1,)`, `optional`, returned when :obj:`label` is provided):
@@ -1189,29 +1144,21 @@ class BertForSequenceClassification(BertPreTrainedModel):
         hidden_states (:obj:`tuple(torch.FloatTensor)`, `optional`, returned when ``config.output_hidden_states=True``):
             Tuple of :obj:`torch.FloatTensor` (one for the output of the embeddings + one for the output of each layer)
             of shape :obj:`(batch_size, sequence_length, hidden_size)`.
-
             Hidden-states of the model at the output of each layer plus the initial embedding outputs.
         attentions (:obj:`tuple(torch.FloatTensor)`, `optional`, returned when ``config.output_attentions=True``):
             Tuple of :obj:`torch.FloatTensor` (one for each layer) of shape
             :obj:`(batch_size, num_heads, sequence_length, sequence_length)`.
-
             Attentions weights after the attention softmax, used to compute the weighted average in the self-attention
             heads.
-
     Examples::
-
         from transformers import BertTokenizer, BertForSequenceClassification
         import torch
-
         tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
         model = BertForSequenceClassification.from_pretrained('bert-base-uncased')
-
         input_ids = torch.tensor(tokenizer.encode("Hello, my dog is cute", add_special_tokens=True)).unsqueeze(0)  # Batch size 1
         labels = torch.tensor([1]).unsqueeze(0)  # Batch size 1
         outputs = model(input_ids, labels=labels)
-
         loss, logits = outputs[:2]
-
         """
 
         outputs = self.bert(
@@ -1274,42 +1221,32 @@ class BertForMultipleChoice(BertPreTrainedModel):
             Labels for computing the multiple choice classification loss.
             Indices should be in ``[0, ..., num_choices]`` where `num_choices` is the size of the second dimension
             of the input tensors. (see `input_ids` above)
-
     Returns:
         :obj:`tuple(torch.FloatTensor)` comprising various elements depending on the configuration (:class:`~transformers.BertConfig`) and inputs:
         loss (:obj:`torch.FloatTensor` of shape `(1,)`, `optional`, returned when :obj:`labels` is provided):
             Classification loss.
         classification_scores (:obj:`torch.FloatTensor` of shape :obj:`(batch_size, num_choices)`):
             `num_choices` is the second dimension of the input tensors. (see `input_ids` above).
-
             Classification scores (before SoftMax).
         hidden_states (:obj:`tuple(torch.FloatTensor)`, `optional`, returned when ``config.output_hidden_states=True``):
             Tuple of :obj:`torch.FloatTensor` (one for the output of the embeddings + one for the output of each layer)
             of shape :obj:`(batch_size, sequence_length, hidden_size)`.
-
             Hidden-states of the model at the output of each layer plus the initial embedding outputs.
         attentions (:obj:`tuple(torch.FloatTensor)`, `optional`, returned when ``config.output_attentions=True``):
             Tuple of :obj:`torch.FloatTensor` (one for each layer) of shape
             :obj:`(batch_size, num_heads, sequence_length, sequence_length)`.
-
             Attentions weights after the attention softmax, used to compute the weighted average in the self-attention
             heads.
-
     Examples::
-
         from transformers import BertTokenizer, BertForMultipleChoice
         import torch
-
         tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
         model = BertForMultipleChoice.from_pretrained('bert-base-uncased')
         choices = ["Hello, my dog is cute", "Hello, my cat is amazing"]
-
         input_ids = torch.tensor([tokenizer.encode(s, add_special_tokens=True) for s in choices]).unsqueeze(0)  # Batch size 1, 2 choices
         labels = torch.tensor(1).unsqueeze(0)  # Batch size 1
         outputs = model(input_ids, labels=labels)
-
         loss, classification_scores = outputs[:2]
-
         """
         num_choices = input_ids.shape[1]
 
@@ -1374,7 +1311,6 @@ class BertForTokenClassification(BertPreTrainedModel):
         labels (:obj:`torch.LongTensor` of shape :obj:`(batch_size, sequence_length)`, `optional`, defaults to :obj:`None`):
             Labels for computing the token classification loss.
             Indices should be in ``[0, ..., config.num_labels - 1]``.
-
     Returns:
         :obj:`tuple(torch.FloatTensor)` comprising various elements depending on the configuration (:class:`~transformers.BertConfig`) and inputs:
         loss (:obj:`torch.FloatTensor` of shape :obj:`(1,)`, `optional`, returned when ``labels`` is provided) :
@@ -1384,29 +1320,21 @@ class BertForTokenClassification(BertPreTrainedModel):
         hidden_states (:obj:`tuple(torch.FloatTensor)`, `optional`, returned when ``config.output_hidden_states=True``):
             Tuple of :obj:`torch.FloatTensor` (one for the output of the embeddings + one for the output of each layer)
             of shape :obj:`(batch_size, sequence_length, hidden_size)`.
-
             Hidden-states of the model at the output of each layer plus the initial embedding outputs.
         attentions (:obj:`tuple(torch.FloatTensor)`, `optional`, returned when ``config.output_attentions=True``):
             Tuple of :obj:`torch.FloatTensor` (one for each layer) of shape
             :obj:`(batch_size, num_heads, sequence_length, sequence_length)`.
-
             Attentions weights after the attention softmax, used to compute the weighted average in the self-attention
             heads.
-
     Examples::
-
         from transformers import BertTokenizer, BertForTokenClassification
         import torch
-
         tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
         model = BertForTokenClassification.from_pretrained('bert-base-uncased')
-
         input_ids = torch.tensor(tokenizer.encode("Hello, my dog is cute", add_special_tokens=True)).unsqueeze(0)  # Batch size 1
         labels = torch.tensor([1] * input_ids.size(1)).unsqueeze(0)  # Batch size 1
         outputs = model(input_ids, labels=labels)
-
         loss, scores = outputs[:2]
-
         """
 
         outputs = self.bert(
@@ -1477,7 +1405,6 @@ class BertForQuestionAnswering(BertPreTrainedModel):
             Labels for position (index) of the end of the labelled span for computing the token classification loss.
             Positions are clamped to the length of the sequence (`sequence_length`).
             Position outside of the sequence are not taken into account for computing the loss.
-
     Returns:
         :obj:`tuple(torch.FloatTensor)` comprising various elements depending on the configuration (:class:`~transformers.BertConfig`) and inputs:
         loss (:obj:`torch.FloatTensor` of shape :obj:`(1,)`, `optional`, returned when :obj:`labels` is provided):
@@ -1489,33 +1416,24 @@ class BertForQuestionAnswering(BertPreTrainedModel):
         hidden_states (:obj:`tuple(torch.FloatTensor)`, `optional`, returned when ``config.output_hidden_states=True``):
             Tuple of :obj:`torch.FloatTensor` (one for the output of the embeddings + one for the output of each layer)
             of shape :obj:`(batch_size, sequence_length, hidden_size)`.
-
             Hidden-states of the model at the output of each layer plus the initial embedding outputs.
         attentions (:obj:`tuple(torch.FloatTensor)`, `optional`, returned when ``config.output_attentions=True``):
             Tuple of :obj:`torch.FloatTensor` (one for each layer) of shape
             :obj:`(batch_size, num_heads, sequence_length, sequence_length)`.
-
             Attentions weights after the attention softmax, used to compute the weighted average in the self-attention
             heads.
-
     Examples::
-
         from transformers import BertTokenizer, BertForQuestionAnswering
         import torch
-
         tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
         model = BertForQuestionAnswering.from_pretrained('bert-large-uncased-whole-word-masking-finetuned-squad')
-
         question, text = "Who was Jim Henson?", "Jim Henson was a nice puppet"
         encoding = tokenizer.encode_plus(question, text)
         input_ids, token_type_ids = encoding["input_ids"], encoding["token_type_ids"]
         start_scores, end_scores = model(torch.tensor([input_ids]), token_type_ids=torch.tensor([token_type_ids]))
-
         all_tokens = tokenizer.convert_ids_to_tokens(input_ids)
         answer = ' '.join(all_tokens[torch.argmax(start_scores) : torch.argmax(end_scores)+1])
-
         assert answer == "a nice puppet"
-
         """
 
         outputs = self.bert(
