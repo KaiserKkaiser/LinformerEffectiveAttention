@@ -28,9 +28,9 @@ class DataCollatorIntegrationTest(unittest.TestCase):
         MODEL_ID = "bert-base-cased-finetuned-mrpc"
         tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
         data_args = GlueDataTrainingArguments(
-            task_name="mrpc", data_dir="./examples/tests_samples/MRPC", overwrite_cache=True
+            task_name="mrpc", data_dir="./tests/fixtures/tests_samples/MRPC", overwrite_cache=True
         )
-        dataset = GlueDataset(data_args, tokenizer=tokenizer, evaluate=True)
+        dataset = GlueDataset(data_args, tokenizer=tokenizer, mode="dev")
         data_collator = DefaultDataCollator()
         batch = data_collator.collate_batch(dataset.features)
         self.assertEqual(batch["labels"].dtype, torch.long)
@@ -39,9 +39,9 @@ class DataCollatorIntegrationTest(unittest.TestCase):
         MODEL_ID = "distilroberta-base"
         tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
         data_args = GlueDataTrainingArguments(
-            task_name="sts-b", data_dir="./examples/tests_samples/STS-B", overwrite_cache=True
+            task_name="sts-b", data_dir="./tests/fixtures/tests_samples/STS-B", overwrite_cache=True
         )
-        dataset = GlueDataset(data_args, tokenizer=tokenizer, evaluate=True)
+        dataset = GlueDataset(data_args, tokenizer=tokenizer, mode="dev")
         data_collator = DefaultDataCollator()
         batch = data_collator.collate_batch(dataset.features)
         self.assertEqual(batch["labels"].dtype, torch.float)
@@ -74,14 +74,14 @@ class DataCollatorIntegrationTest(unittest.TestCase):
         batch = data_collator.collate_batch(examples)
         self.assertIsInstance(batch, dict)
         self.assertEqual(batch["input_ids"].shape, torch.Size((31, 107)))
-        self.assertEqual(batch["masked_lm_labels"].shape, torch.Size((31, 107)))
+        self.assertEqual(batch["labels"].shape, torch.Size((31, 107)))
 
         dataset = TextDataset(tokenizer, file_path=PATH_SAMPLE_TEXT, block_size=512, overwrite_cache=True)
         examples = [dataset[i] for i in range(len(dataset))]
         batch = data_collator.collate_batch(examples)
         self.assertIsInstance(batch, dict)
         self.assertEqual(batch["input_ids"].shape, torch.Size((2, 512)))
-        self.assertEqual(batch["masked_lm_labels"].shape, torch.Size((2, 512)))
+        self.assertEqual(batch["labels"].shape, torch.Size((2, 512)))
 
 
 @require_torch
@@ -91,14 +91,14 @@ class TrainerIntegrationTest(unittest.TestCase):
         tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
         model = AutoModelForSequenceClassification.from_pretrained(MODEL_ID)
         data_args = GlueDataTrainingArguments(
-            task_name="mrpc", data_dir="./examples/tests_samples/MRPC", overwrite_cache=True
+            task_name="mrpc", data_dir="./tests/fixtures/tests_samples/MRPC", overwrite_cache=True
         )
-        eval_dataset = GlueDataset(data_args, tokenizer=tokenizer, evaluate=True)
+        eval_dataset = GlueDataset(data_args, tokenizer=tokenizer, mode="dev")
 
         training_args = TrainingArguments(output_dir="./examples", no_cuda=True)
         trainer = Trainer(model=model, args=training_args, eval_dataset=eval_dataset)
         result = trainer.evaluate()
-        self.assertLess(result["loss"], 0.2)
+        self.assertLess(result["eval_loss"], 0.2)
 
     def test_trainer_eval_lm(self):
         MODEL_ID = "distilroberta-base"
