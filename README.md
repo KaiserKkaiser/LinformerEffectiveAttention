@@ -1,5 +1,11 @@
 # Comparing standard and effective attention
 
+#### Install from source 
+```bash
+cd EffectiveAttention 
+pip install .
+```
+
 #### Train and eval with standard attention
 
 ```bash
