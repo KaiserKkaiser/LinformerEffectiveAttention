@@ -22,6 +22,8 @@ import os
 from dataclasses import dataclass, field
 from typing import Dict, Optional
 
+import pdb
+
 import numpy as np
 
 from transformers import (
@@ -147,6 +149,7 @@ def main():
             preds = np.argmax(p.predictions, axis=1)
         elif output_mode == "regression":
             preds = np.squeeze(p.predictions)
+        pdb.set_trace()
         return glue_compute_metrics(data_args.task_name, preds, p.label_ids)
 
     # Initialize our Trainer
@@ -184,7 +187,6 @@ def main():
 
         for eval_dataset in eval_datasets:
             result = trainer.evaluate(eval_dataset=eval_dataset)
-
             output_eval_file = os.path.join(
                 training_args.output_dir, f"eval_results_{eval_dataset.args.task_name}.txt"
             )
