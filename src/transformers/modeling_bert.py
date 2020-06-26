@@ -284,7 +284,7 @@ class BertEffectiveSelfAttention(nn.Module):
         return outputs
 
 class BertEffectiveLinformerSelfAttention(nn.Module):
-    def __init__(self, config):
+    def __init__(self, config, E):
         super().__init__()
         # Check valid hidden size
         if config.hidden_size % config.num_attention_heads != 0:
@@ -301,7 +301,7 @@ class BertEffectiveLinformerSelfAttention(nn.Module):
         self.query = nn.Linear(config.hidden_size, self.all_head_size)
         self.key = nn.Linear(config.hidden_size, self.all_head_size)
         self.value = nn.Linear(config.hidden_size, self.all_head_size)
-
+        self.E = E
         self.dropout = nn.Dropout(config.attention_probs_dropout_prob)
 
     def transpose_for_scores(self, x):
@@ -324,6 +324,8 @@ class BertEffectiveLinformerSelfAttention(nn.Module):
         # such that the encoder's padding tokens are not attended to.
         if encoder_hidden_states is not None:
             mixed_key_layer = self.key(encoder_hidden_states)
+            # This is for linformer
+            mixed_key_layer = torch.transpose(self.E(torch.transpose(mixed_key_layer.T), -1, -2), -1, -2)
             mixed_value_layer = self.value(encoder_hidden_states)
             attention_mask = encoder_attention_mask
         else:
@@ -484,14 +486,14 @@ class BertAttention(nn.Module):
     #     self.self = BertEffectiveSelfAttention(config)
     #     self.output = BertSelfOutput(config)
     #     self.pruned_heads = set()
-    def __init__(self, config):
+    def __init__(self, config, E):
         super().__init__()
         if config.attention_type == 'standard':
             self.self = BertSelfAttention(config)
         elif config.attention_type == 'effective':
             self.self = BertEffectiveSelfAttention(config)
         elif config.attention_type == 'linformer':
-            self.self = BertEffectiveLinformerSelfAttention(config)
+            self.self = BertEffectiveLinformerSelfAttention(config, E)
         else:
             raise ValueError('Only standard or effective or effective linformer attention are supported. But you input ', config.attention_type)
         self.output = BertSelfOutput(config)
@@ -566,12 +568,12 @@ class BertOutput(nn.Module):
 
 
 class BertLayer(nn.Module):
-    def __init__(self, config):
+    def __init__(self, config, E):
         super().__init__()
-        self.attention = BertAttention(config)
+        self.attention = BertAttention(config, E)
         self.is_decoder = config.is_decoder
         if self.is_decoder:
-            self.crossattention = BertAttention(config)
+            self.crossattention = BertAttention(config, E)
         self.intermediate = BertIntermediate(config)
         self.output = BertOutput(config)
 
@@ -606,7 +608,10 @@ class BertEncoder(nn.Module):
         super().__init__()
         self.output_attentions = config.output_attentions
         self.output_hidden_states = config.output_hidden_states
-        self.layer = nn.ModuleList([BertLayer(config) for _ in range(config.num_hidden_layers)])
+        # TODO: Initialize matrix E for linformer
+        self.E = nn.Linear(config.hidden_size, int(config.k_value))
+        self.layer = nn.ModuleList([BertLayer(config, self.E) for _ in range(config.num_hidden_layers)])
+        
 
     def forward(
         self,
