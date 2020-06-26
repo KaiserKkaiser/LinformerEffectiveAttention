@@ -1,7 +1,3 @@
----
-language: chinese
----
-
 # Introduction
 This model was trained on TPU and the details are as follows:
 

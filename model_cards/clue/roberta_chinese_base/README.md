@@ -1,7 +1,3 @@
----
-language: chinese
----
-
 ## roberta_chinese_base
 
 ### Overview

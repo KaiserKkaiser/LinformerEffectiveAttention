@@ -31,12 +31,11 @@ from .modeling_roberta import (
 
 logger = logging.getLogger(__name__)
 
-CAMEMBERT_PRETRAINED_MODEL_ARCHIVE_LIST = [
-    "camembert-base",
-    "Musixmatch/umberto-commoncrawl-cased-v1",
-    "Musixmatch/umberto-wikipedia-uncased-v1",
-    # See all CamemBERT models at https://huggingface.co/models?filter=camembert
-]
+CAMEMBERT_PRETRAINED_MODEL_ARCHIVE_MAP = {
+    "camembert-base": "https://s3.amazonaws.com/models.huggingface.co/bert/camembert-base-pytorch_model.bin",
+    "umberto-commoncrawl-cased-v1": "https://s3.amazonaws.com/models.huggingface.co/bert/Musixmatch/umberto-commoncrawl-cased-v1/pytorch_model.bin",
+    "umberto-wikipedia-uncased-v1": "https://s3.amazonaws.com/models.huggingface.co/bert/Musixmatch/umberto-wikipedia-uncased-v1/pytorch_model.bin",
+}
 
 CAMEMBERT_START_DOCSTRING = r"""
 
@@ -63,6 +62,7 @@ class CamembertModel(RobertaModel):
     """
 
     config_class = CamembertConfig
+    pretrained_model_archive_map = CAMEMBERT_PRETRAINED_MODEL_ARCHIVE_MAP
 
 
 @add_start_docstrings(
@@ -75,6 +75,7 @@ class CamembertForMaskedLM(RobertaForMaskedLM):
     """
 
     config_class = CamembertConfig
+    pretrained_model_archive_map = CAMEMBERT_PRETRAINED_MODEL_ARCHIVE_MAP
 
 
 @add_start_docstrings(
@@ -89,6 +90,7 @@ class CamembertForSequenceClassification(RobertaForSequenceClassification):
     """
 
     config_class = CamembertConfig
+    pretrained_model_archive_map = CAMEMBERT_PRETRAINED_MODEL_ARCHIVE_MAP
 
 
 @add_start_docstrings(
@@ -103,6 +105,7 @@ class CamembertForMultipleChoice(RobertaForMultipleChoice):
     """
 
     config_class = CamembertConfig
+    pretrained_model_archive_map = CAMEMBERT_PRETRAINED_MODEL_ARCHIVE_MAP
 
 
 @add_start_docstrings(
@@ -117,6 +120,7 @@ class CamembertForTokenClassification(RobertaForTokenClassification):
     """
 
     config_class = CamembertConfig
+    pretrained_model_archive_map = CAMEMBERT_PRETRAINED_MODEL_ARCHIVE_MAP
 
 
 @add_start_docstrings(
@@ -131,3 +135,4 @@ class CamembertForQuestionAnswering(RobertaForQuestionAnswering):
     """
 
     config_class = CamembertConfig
+    pretrained_model_archive_map = CAMEMBERT_PRETRAINED_MODEL_ARCHIVE_MAP

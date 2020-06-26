@@ -31,8 +31,14 @@ from torch.utils.data import DataLoader, RandomSampler, SequentialSampler, Tenso
 from torch.utils.data.distributed import DistributedSampler
 from tqdm import tqdm, trange
 
-from transformers import WEIGHTS_NAME, AdamW, AutoConfig, AutoTokenizer, get_linear_schedule_with_warmup
-from transformers.modeling_auto import AutoModelForMultipleChoice
+from transformers import (
+    WEIGHTS_NAME,
+    AdamW,
+    BertConfig,
+    BertForMultipleChoice,
+    BertTokenizer,
+    get_linear_schedule_with_warmup,
+)
 
 
 try:
@@ -42,6 +48,12 @@ except ImportError:
 
 
 logger = logging.getLogger(__name__)
+
+ALL_MODELS = sum((tuple(conf.pretrained_config_archive_map.keys()) for conf in [BertConfig]), ())
+
+MODEL_CLASSES = {
+    "bert": (BertConfig, BertForMultipleChoice, BertTokenizer),
+}
 
 
 class SwagExample(object):
@@ -481,11 +493,18 @@ def main():
         help="SWAG csv for predictions. E.g., val.csv or test.csv",
     )
     parser.add_argument(
+        "--model_type",
+        default=None,
+        type=str,
+        required=True,
+        help="Model type selected in the list: " + ", ".join(MODEL_CLASSES.keys()),
+    )
+    parser.add_argument(
         "--model_name_or_path",
         default=None,
         type=str,
         required=True,
-        help="Path to pretrained model or model identifier from huggingface.co/models",
+        help="Path to pre-trained model or shortcut name selected in the list: " + ", ".join(ALL_MODELS),
     )
     parser.add_argument(
         "--output_dir",
@@ -516,6 +535,9 @@ def main():
     parser.add_argument("--do_eval", action="store_true", help="Whether to run eval on the dev set.")
     parser.add_argument(
         "--evaluate_during_training", action="store_true", help="Rul evaluation during training at each logging step."
+    )
+    parser.add_argument(
+        "--do_lower_case", action="store_true", help="Set this flag if you are using an uncased model."
     )
 
     parser.add_argument("--per_gpu_train_batch_size", default=8, type=int, help="Batch size per GPU/CPU for training.")
@@ -630,9 +652,13 @@ def main():
     if args.local_rank not in [-1, 0]:
         torch.distributed.barrier()  # Make sure only the first process in distributed training will download model & vocab
 
-    config = AutoConfig.from_pretrained(args.config_name if args.config_name else args.model_name_or_path)
-    tokenizer = AutoTokenizer.from_pretrained(args.tokenizer_name if args.tokenizer_name else args.model_name_or_path,)
-    model = AutoModelForMultipleChoice.from_pretrained(
+    args.model_type = args.model_type.lower()
+    config_class, model_class, tokenizer_class = MODEL_CLASSES[args.model_type]
+    config = config_class.from_pretrained(args.config_name if args.config_name else args.model_name_or_path)
+    tokenizer = tokenizer_class.from_pretrained(
+        args.tokenizer_name if args.tokenizer_name else args.model_name_or_path, do_lower_case=args.do_lower_case
+    )
+    model = model_class.from_pretrained(
         args.model_name_or_path, from_tf=bool(".ckpt" in args.model_name_or_path), config=config
     )
 
@@ -668,8 +694,8 @@ def main():
         torch.save(args, os.path.join(args.output_dir, "training_args.bin"))
 
         # Load a trained model and vocabulary that you have fine-tuned
-        model = AutoModelForMultipleChoice.from_pretrained(args.output_dir)
-        tokenizer = AutoTokenizer.from_pretrained(args.output_dir)
+        model = model_class.from_pretrained(args.output_dir)
+        tokenizer = tokenizer_class.from_pretrained(args.output_dir)
         model.to(args.device)
 
     # Evaluation - we can ask to evaluate all the checkpoints (sub-directories) in a directory
@@ -692,8 +718,8 @@ def main():
         for checkpoint in checkpoints:
             # Reload the model
             global_step = checkpoint.split("-")[-1] if len(checkpoints) > 1 else ""
-            model = AutoModelForMultipleChoice.from_pretrained(checkpoint)
-            tokenizer = AutoTokenizer.from_pretrained(checkpoint)
+            model = model_class.from_pretrained(checkpoint)
+            tokenizer = tokenizer_class.from_pretrained(checkpoint)
             model.to(args.device)
 
             # Evaluate

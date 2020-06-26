@@ -24,22 +24,15 @@ import tensorflow as tf
 from .configuration_transfo_xl import TransfoXLConfig
 from .file_utils import add_start_docstrings, add_start_docstrings_to_callable
 from .modeling_tf_transfo_xl_utilities import TFAdaptiveSoftmaxMask
-from .modeling_tf_utils import (
-    TFPreTrainedModel,
-    cast_bool_to_primitive,
-    get_initializer,
-    keras_serializable,
-    shape_list,
-)
+from .modeling_tf_utils import TFPreTrainedModel, get_initializer, keras_serializable, shape_list
 from .tokenization_utils import BatchEncoding
 
 
 logger = logging.getLogger(__name__)
 
-TF_TRANSFO_XL_PRETRAINED_MODEL_ARCHIVE_LIST = [
-    "transfo-xl-wt103",
-    # See all Transformer XL models at https://huggingface.co/models?filter=transfo-xl
-]
+TF_TRANSFO_XL_PRETRAINED_MODEL_ARCHIVE_MAP = {
+    "transfo-xl-wt103": "https://s3.amazonaws.com/models.huggingface.co/bert/transfo-xl-wt103-tf_model.h5",
+}
 
 
 class TFPositionalEmbedding(tf.keras.layers.Layer):
@@ -115,12 +108,14 @@ class TFRelPartialLearnableMultiHeadAttn(tf.keras.layers.Layer):
         pre_lnorm=False,
         r_r_bias=None,
         r_w_bias=None,
+        output_attentions=False,
         layer_norm_epsilon=1e-5,
         init_std=0.02,
         **kwargs
     ):
         super().__init__(**kwargs)
 
+        self.output_attentions = output_attentions
         self.n_head = n_head
         self.d_model = d_model
         self.d_head = d_head
@@ -174,7 +169,7 @@ class TFRelPartialLearnableMultiHeadAttn(tf.keras.layers.Layer):
         return x
 
     def call(self, inputs, training=False):
-        w, r, attn_mask, mems, head_mask, output_attentions = inputs
+        w, r, attn_mask, mems, head_mask = inputs
         qlen, rlen, bsz = shape_list(w)[0], shape_list(r)[0], shape_list(w)[1]
 
         if mems is not None:
@@ -247,7 +242,7 @@ class TFRelPartialLearnableMultiHeadAttn(tf.keras.layers.Layer):
             # residual connection + layer normalization
             outputs = [self.layer_norm(w + attn_out)]
 
-        if cast_bool_to_primitive(output_attentions) is True:
+        if self.output_attentions:
             outputs.append(attn_prob)
 
         return outputs
@@ -268,6 +263,7 @@ class TFRelPartialLearnableDecoderLayer(tf.keras.layers.Layer):
         pre_lnorm=False,
         r_w_bias=None,
         r_r_bias=None,
+        output_attentions=False,
         layer_norm_epsilon=1e-5,
         init_std=0.02,
         **kwargs
@@ -287,6 +283,7 @@ class TFRelPartialLearnableDecoderLayer(tf.keras.layers.Layer):
             r_w_bias=r_w_bias,
             r_r_bias=r_r_bias,
             init_std=init_std,
+            output_attentions=output_attentions,
             layer_norm_epsilon=layer_norm_epsilon,
             name="dec_attn",
         )
@@ -301,10 +298,8 @@ class TFRelPartialLearnableDecoderLayer(tf.keras.layers.Layer):
         )
 
     def call(self, inputs, training=False):
-        dec_inp, r, dec_attn_mask, mems, head_mask, output_attentions = inputs
-        attn_outputs = self.dec_attn(
-            [dec_inp, r, dec_attn_mask, mems, head_mask, output_attentions], training=training
-        )
+        dec_inp, r, dec_attn_mask, mems, head_mask = inputs
+        attn_outputs = self.dec_attn([dec_inp, r, dec_attn_mask, mems, head_mask], training=training)
         ff_output = self.pos_ff(attn_outputs[0], training=training)
 
         outputs = [ff_output] + attn_outputs[1:]
@@ -390,8 +385,8 @@ class TFTransfoXLMainLayer(tf.keras.layers.Layer):
 
     def __init__(self, config, **kwargs):
         super().__init__(**kwargs)
-        self.output_hidden_states = config.output_hidden_states
         self.output_attentions = config.output_attentions
+        self.output_hidden_states = config.output_hidden_states
 
         self.n_token = config.vocab_size
 
@@ -439,6 +434,7 @@ class TFTransfoXLMainLayer(tf.keras.layers.Layer):
                         pre_lnorm=config.pre_lnorm,
                         r_w_bias=None if self.untie_r else self.r_w_bias,
                         r_r_bias=None if self.untie_r else self.r_r_bias,
+                        output_attentions=self.output_attentions,
                         layer_norm_epsilon=config.layer_norm_epsilon,
                         init_std=config.init_std,
                         name="layers_._{}".format(i),
@@ -517,25 +513,21 @@ class TFTransfoXLMainLayer(tf.keras.layers.Layer):
 
         return new_mems
 
-    def call(self, inputs, mems=None, head_mask=None, inputs_embeds=None, output_attentions=None, training=False):
+    def call(self, inputs, mems=None, head_mask=None, inputs_embeds=None, training=False):
         if isinstance(inputs, (tuple, list)):
             input_ids = inputs[0]
             mems = inputs[1] if len(inputs) > 1 else mems
             head_mask = inputs[2] if len(inputs) > 2 else head_mask
             inputs_embeds = inputs[3] if len(inputs) > 3 else inputs_embeds
-            output_attentions = inputs[4] if len(inputs) > 4 else output_attentions
-            assert len(inputs) <= 5, "Too many inputs."
+            assert len(inputs) <= 4, "Too many inputs."
         elif isinstance(inputs, (dict, BatchEncoding)):
             input_ids = inputs.get("input_ids")
             mems = inputs.get("mems", mems)
             head_mask = inputs.get("head_mask", head_mask)
             inputs_embeds = inputs.get("inputs_embeds", inputs_embeds)
-            output_attentions = inputs.get("output_attentions", output_attentions)
-            assert len(inputs) <= 5, "Too many inputs."
+            assert len(inputs) <= 4, "Too many inputs."
         else:
             input_ids = inputs
-
-        output_attentions = output_attentions if output_attentions is not None else self.output_attentions
 
         # the original code for Transformer-XL used shapes [len, bsz] but we want a unified interface in the library
         # so we transpose here from shape [bsz, len] to shape [len, bsz]
@@ -607,11 +599,9 @@ class TFTransfoXLMainLayer(tf.keras.layers.Layer):
             for i, layer in enumerate(self.layers):
                 hids.append(core_out)
                 mems_i = None if mems is None else mems[i]
-                layer_outputs = layer(
-                    [core_out, pos_emb, dec_attn_mask, mems_i, head_mask[i], output_attentions], training=training,
-                )
+                layer_outputs = layer([core_out, pos_emb, dec_attn_mask, mems_i, head_mask[i]], training=training)
                 core_out = layer_outputs[0]
-                if cast_bool_to_primitive(output_attentions) is True:
+                if self.output_attentions:
                     attentions.append(layer_outputs[1])
         else:  # learnable embeddings and absolute embeddings
             raise NotImplementedError  # Removed these to avoid maintaining dead code - They are not used in our pretrained checkpoint
@@ -627,7 +617,7 @@ class TFTransfoXLMainLayer(tf.keras.layers.Layer):
             hids.append(core_out)
             hids = list(tf.transpose(t, perm=(1, 0, 2)) for t in hids)
             outputs.append(hids)
-        if cast_bool_to_primitive(output_attentions) is True:
+        if self.output_attentions:
             # Transpose to library standard shape [bsz, n_heads, query_seq_len, key_seq_len]
             attentions = list(tf.transpose(t, perm=(2, 3, 0, 1)) for t in attentions)
             outputs.append(attentions)
@@ -640,6 +630,7 @@ class TFTransfoXLPreTrainedModel(TFPreTrainedModel):
     """
 
     config_class = TransfoXLConfig
+    pretrained_model_archive_map = TF_TRANSFO_XL_PRETRAINED_MODEL_ARCHIVE_MAP
     base_model_prefix = "transformer"
 
 
@@ -680,7 +671,7 @@ TRANSFO_XL_INPUTS_DOCSTRING = r"""
             :func:`transformers.PreTrainedTokenizer.encode_plus` for details.
 
             `What are input IDs? <../glossary.html#input-ids>`__
-        mems (:obj:`List[tf.Tensor]` of length :obj:`config.n_layers`):
+        mems (:obj:`List[torch.FloatTensor]` of length :obj:`config.n_layers`):
             Contains pre-computed hidden-states (key and values in the attention blocks) as computed by the model
             (see `mems` output below). Can be used to speed up sequential decoding. The token ids which have their mems
             given to this model should not be passed as input ids as they have already been computed.
@@ -688,7 +679,7 @@ TRANSFO_XL_INPUTS_DOCSTRING = r"""
             Mask to nullify selected heads of the self-attention modules.
             Mask values selected in ``[0, 1]``:
             :obj:`1` indicates the head is **not masked**, :obj:`0` indicates the head is **masked**.
-        inputs_embeds (:obj:`tf.Tensor` or :obj:`Numpy array` of shape :obj:`(batch_size, sequence_length, hidden_size)`, `optional`, defaults to :obj:`None`):
+        input_embeds (:obj:`tf.Tensor` or :obj:`Numpy array` of shape :obj:`(batch_size, sequence_length, hidden_size)`, `optional`, defaults to :obj:`None`):
             Optionally, instead of passing :obj:`input_ids` you can choose to directly pass an embedded representation.
             This is useful if you want more control over how to convert `input_ids` indices into associated vectors
             than the model's internal embedding lookup matrix.
@@ -708,20 +699,20 @@ class TFTransfoXLModel(TFTransfoXLPreTrainedModel):
     def call(self, inputs, **kwargs):
         r"""
     Return:
-        :obj:`tuple(tf.Tensor)` comprising various elements depending on the configuration (:class:`~transformers.TransfoXLConfig`) and inputs:
-        last_hidden_state (:obj:`tf.Tensor` of shape :obj:`(batch_size, sequence_length, hidden_size)`):
+        :obj:`tuple(torch.FloatTensor)` comprising various elements depending on the configuration (:class:`~transformers.TransfoXLConfig`) and inputs:
+        last_hidden_state (:obj:`torch.FloatTensor` of shape :obj:`(batch_size, sequence_length, hidden_size)`):
             Sequence of hidden-states at the last layer of the model.
-        mems (:obj:`List[tf.Tensor]` of length :obj:`config.n_layers`):
+        mems (:obj:`List[torch.FloatTensor]` of length :obj:`config.n_layers`):
             Contains pre-computed hidden-states (key and values in the attention blocks).
             Can be used (see `mems` input) to speed up sequential decoding. The token ids which have their past given to this model
             should not be passed as input ids as they have already been computed.
-        hidden_states (:obj:`tuple(tf.Tensor)`, `optional`, returned when ``config.output_hidden_states=True``):
-            Tuple of :obj:`tf.Tensor` (one for the output of the embeddings + one for the output of each layer)
+        hidden_states (:obj:`tuple(torch.FloatTensor)`, `optional`, returned when ``config.output_hidden_states=True``):
+            Tuple of :obj:`torch.FloatTensor` (one for the output of the embeddings + one for the output of each layer)
             of shape :obj:`(batch_size, sequence_length, hidden_size)`.
 
             Hidden-states of the model at the output of each layer plus the initial embedding outputs.
-        attentions (:obj:`tuple(tf.Tensor)`, `optional`, returned when ``output_attentions=True``):
-            Tuple of :obj:`tf.Tensor` (one for each layer) of shape
+        attentions (:obj:`tuple(torch.FloatTensor)`, `optional`, returned when ``config.output_attentions=True``):
+            Tuple of :obj:`torch.FloatTensor` (one for each layer) of shape
             :obj:`(batch_size, num_heads, sequence_length, sequence_length)`.
 
             Attentions weights after the attention softmax, used to compute the weighted average in the self-attention
@@ -743,7 +734,7 @@ class TFTransfoXLModel(TFTransfoXLPreTrainedModel):
         return outputs
 
 
-class TFTransfoXLMHead(tf.keras.layers.Layer):
+class TFTransfoXLLMHead(tf.keras.layers.Layer):
     def __init__(self, config, input_embeddings, **kwargs):
         super().__init__(**kwargs)
         self.vocab_size = config.vocab_size
@@ -794,32 +785,23 @@ class TFTransfoXLLMHeadModel(TFTransfoXLPreTrainedModel):
         return self.transformer.init_mems(bsz)
 
     @add_start_docstrings_to_callable(TRANSFO_XL_INPUTS_DOCSTRING)
-    def call(
-        self,
-        inputs,
-        mems=None,
-        head_mask=None,
-        inputs_embeds=None,
-        labels=None,
-        output_attentions=None,
-        training=False,
-    ):
+    def call(self, inputs, mems=None, head_mask=None, inputs_embeds=None, labels=None, training=False):
         r"""
     Return:
-        :obj:`tuple(tf.Tensor)` comprising various elements depending on the configuration (:class:`~transformers.TransfoXLConfig`) and inputs:
-        prediction_scores (:obj:`tf.Tensor` of shape :obj:`(batch_size, sequence_length, config.vocab_size)`):
+        :obj:`tuple(torch.FloatTensor)` comprising various elements depending on the configuration (:class:`~transformers.TransfoXLConfig`) and inputs:
+        prediction_scores (:obj:`torch.FloatTensor` of shape :obj:`(batch_size, sequence_length, config.vocab_size)`):
             Prediction scores of the language modeling head (scores for each vocabulary token before SoftMax).
-        mems (:obj:`List[tf.Tensor]` of length :obj:`config.n_layers`):
+        mems (:obj:`List[torch.FloatTensor]` of length :obj:`config.n_layers`):
             Contains pre-computed hidden-states (key and values in the attention blocks).
             Can be used (see `past` input) to speed up sequential decoding. The token ids which have their past given to this model
             should not be passed as input ids as they have already been computed.
-        hidden_states (:obj:`tuple(tf.Tensor)`, `optional`, returned when ``config.output_hidden_states=True``):
-            Tuple of :obj:`tf.Tensor` (one for the output of the embeddings + one for the output of each layer)
+        hidden_states (:obj:`tuple(torch.FloatTensor)`, `optional`, returned when ``config.output_hidden_states=True``):
+            Tuple of :obj:`torch.FloatTensor` (one for the output of the embeddings + one for the output of each layer)
             of shape :obj:`(batch_size, sequence_length, hidden_size)`.
 
             Hidden-states of the model at the output of each layer plus the initial embedding outputs.
-        attentions (:obj:`tuple(tf.Tensor)`, `optional`, returned when ``output_attentions=True``):
-            Tuple of :obj:`tf.Tensor` (one for each layer) of shape
+        attentions (:obj:`tuple(torch.FloatTensor)`, `optional`, returned when ``config.output_attentions=True``):
+            Tuple of :obj:`torch.FloatTensor` (one for each layer) of shape
             :obj:`(batch_size, num_heads, sequence_length, sequence_length)`.
 
             Attentions weights after the attention softmax, used to compute the weighted average in the self-attention
@@ -843,16 +825,14 @@ class TFTransfoXLLMHeadModel(TFTransfoXLPreTrainedModel):
             head_mask = inputs[2] if len(inputs) > 2 else head_mask
             inputs_embeds = inputs[3] if len(inputs) > 3 else inputs_embeds
             labels = inputs[4] if len(inputs) > 4 else labels
-            output_attentions = inputs[5] if len(inputs) > 5 else output_attentions
-            assert len(inputs) <= 6, "Too many inputs."
+            assert len(inputs) <= 5, "Too many inputs."
         elif isinstance(inputs, dict):
             input_ids = inputs.get("input_ids")
             mems = inputs.get("mems", mems)
             head_mask = inputs.get("head_mask", head_mask)
             inputs_embeds = inputs.get("inputs_embeds", inputs_embeds)
             labels = inputs.get("labels", labels)
-            output_attentions = inputs.get("output_attentions", output_attentions)
-            assert len(inputs) <= 6, "Too many inputs."
+            assert len(inputs) <= 5, "Too many inputs."
         else:
             input_ids = inputs
 
@@ -861,9 +841,7 @@ class TFTransfoXLLMHeadModel(TFTransfoXLPreTrainedModel):
         else:
             bsz, tgt_len = shape_list(inputs_embeds)[:2]
 
-        transformer_outputs = self.transformer(
-            [input_ids, mems, head_mask, inputs_embeds, output_attentions], training=training
-        )
+        transformer_outputs = self.transformer([input_ids, mems, head_mask, inputs_embeds], training=training)
 
         last_hidden = transformer_outputs[0]
         pred_hid = last_hidden[:, -tgt_len:]

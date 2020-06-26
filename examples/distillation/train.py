@@ -273,7 +273,7 @@ def main():
         token_probs = None
 
     train_lm_seq_dataset = LmSeqsDataset(params=args, data=data)
-    logger.info("Data loader created.")
+    logger.info(f"Data loader created.")
 
     # STUDENT #
     logger.info(f"Loading student config from {args.student_config}")
@@ -288,7 +288,7 @@ def main():
 
     if args.n_gpu > 0:
         student.to(f"cuda:{args.local_rank}")
-    logger.info("Student loaded.")
+    logger.info(f"Student loaded.")
 
     # TEACHER #
     teacher = teacher_model_class.from_pretrained(args.teacher_name, output_hidden_states=True)

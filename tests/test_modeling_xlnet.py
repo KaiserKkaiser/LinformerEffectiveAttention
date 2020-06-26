@@ -21,7 +21,7 @@ from transformers import is_torch_available
 
 from .test_configuration_common import ConfigTester
 from .test_modeling_common import ModelTesterMixin, ids_tensor
-from .utils import require_torch, slow, torch_device
+from .utils import CACHE_DIR, require_torch, slow, torch_device
 
 
 if is_torch_available():
@@ -35,7 +35,7 @@ if is_torch_available():
         XLNetForTokenClassification,
         XLNetForQuestionAnswering,
     )
-    from transformers.modeling_xlnet import XLNET_PRETRAINED_MODEL_ARCHIVE_LIST
+    from transformers.modeling_xlnet import XLNET_PRETRAINED_MODEL_ARCHIVE_MAP
 
 
 @require_torch
@@ -61,7 +61,7 @@ class XLNetModelTest(ModelTesterMixin, unittest.TestCase):
         def __init__(
             self,
             parent,
-            batch_size=14,
+            batch_size=13,
             seq_length=7,
             mem_len=10,
             clamp_len=-1,
@@ -238,7 +238,7 @@ class XLNetModelTest(ModelTesterMixin, unittest.TestCase):
             model.to(torch_device)
             model.eval()
 
-            _, _, attentions = model(input_ids_1, target_mapping=target_mapping, output_attentions=True)
+            _, _, attentions = model(input_ids_1, target_mapping=target_mapping)
 
             self.parent.assertEqual(len(attentions), config.n_layer)
             self.parent.assertIsInstance(attentions[0], tuple)
@@ -483,6 +483,7 @@ class XLNetModelTest(ModelTesterMixin, unittest.TestCase):
     def test_xlnet_base_model_with_att_output(self):
         self.model_tester.set_seed()
         config_and_inputs = self.model_tester.prepare_config_and_inputs()
+        config_and_inputs[0].output_attentions = True
         self.model_tester.create_and_check_xlnet_base_model_with_att_output(*config_and_inputs)
 
     def test_xlnet_lm_head(self):
@@ -507,17 +508,15 @@ class XLNetModelTest(ModelTesterMixin, unittest.TestCase):
 
     @slow
     def test_model_from_pretrained(self):
-        for model_name in XLNET_PRETRAINED_MODEL_ARCHIVE_LIST[:1]:
-            model = XLNetModel.from_pretrained(model_name)
+        for model_name in list(XLNET_PRETRAINED_MODEL_ARCHIVE_MAP.keys())[:1]:
+            model = XLNetModel.from_pretrained(model_name, cache_dir=CACHE_DIR)
             self.assertIsNotNone(model)
 
 
-@require_torch
 class XLNetModelLanguageGenerationTest(unittest.TestCase):
     @slow
     def test_lm_generate_xlnet_base_cased(self):
         model = XLNetLMHeadModel.from_pretrained("xlnet-base-cased")
-        model.to(torch_device)
         input_ids = torch.tensor(
             [
                 [

@@ -64,8 +64,27 @@ TensorFlow: 2.1.0
 Python: 3.7.6
 ```
 
-### Access this albert_xxlargev1_sqd2_512 fine-tuned model with:
+### Inferencing / prediction works with the current Transformers v2.4.1
+
+### Access this albert_xxlargev1_sqd2_512 fine-tuned model with "tried & true" code:
 
 ```python
-tokenizer = AutoTokenizer.from_pretrained("ahotrod/albert_xxlargev1_squad2_512")
-model = AutoModelForQuestionAnswering.from_pretrained("ahotrod/albert_xxlargev1_squad2_512")
+config_class, model_class, tokenizer_class = \
+        AlbertConfig, AlbertForQuestionAnswering, AlbertTokenizer
+
+model_name_or_path = "ahotrod/albert_xxlargev1_squad2_512"
+config = config_class.from_pretrained(model_name_or_path)
+tokenizer = tokenizer_class.from_pretrained(model_name_or_path, do_lower_case=True)
+model = model_class.from_pretrained(model_name_or_path, config=config)
+```
+
+### or the AutoModels (AutoConfig, AutoTokenizer & AutoModel) should also work, however I have yet to use them in my app & confirm:
+
+```python
+from transformers import AutoConfig, AutoTokenizer, AutoModel
+
+model_name_or_path = "ahotrod/albert_xxlargev1_squad2_512"
+config = AutoConfig.from_pretrained(model_name_or_path)
+tokenizer = AutoTokenizer.from_pretrained(model_name_or_path, do_lower_case=True)
+model = AutoModel.from_pretrained(model_name_or_path, config=config)
+```

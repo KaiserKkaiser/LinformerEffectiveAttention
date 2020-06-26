@@ -90,28 +90,17 @@ def main():
     # or by passing the --help flag to this script.
     # We now keep distinct sets of args, for a cleaner separation of concerns.
 
-<<<<<<< HEAD
 <<<<<<< HEAD:examples/run_glue.py
-=======
-<<<<<<<< HEAD:examples/multiple-choice/run_multiple_choice.py
-    parser = HfArgumentParser((ModelArguments, DataTrainingArguments, TrainingArguments))
-    model_args, data_args, training_args = parser.parse_args_into_dataclasses()
-========
->>>>>>> f8afb02773c80af495fd264c9dfefd5ed5da800a
     parser = HfArgumentParser((ModelArguments, GlueDataTrainingArguments, TrainingArguments))
     # model_args, data_args, training_args = parser.parse_args_into_dataclasses()
     model_args, data_args, training_args, remaining_args = parser.parse_args_into_dataclasses(return_remaining_strings=True)
     # Reading the attention type and k_values
     attention_type = remaining_args[-3]
     k_value = remaining_args[-1]
-<<<<<<< HEAD
 =======
     parser = HfArgumentParser((ModelArguments, DataTrainingArguments, TrainingArguments))
     model_args, data_args, training_args = parser.parse_args_into_dataclasses()
 >>>>>>> f8afb02773c80af495fd264c9dfefd5ed5da800a:examples/multiple-choice/run_multiple_choice.py
-=======
->>>>>>>> f8afb02773c80af495fd264c9dfefd5ed5da800a:examples/run_glue.py
->>>>>>> f8afb02773c80af495fd264c9dfefd5ed5da800a
 
     if (
         os.path.exists(training_args.output_dir)

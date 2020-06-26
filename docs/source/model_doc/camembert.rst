@@ -1,9 +1,6 @@
 CamemBERT
 ----------------------------------------------------
 
-Overview
-~~~~~~~~~~~~~~~~~~~~~
-
 The CamemBERT model was proposed in `CamemBERT: a Tasty French Language Model <https://arxiv.org/abs/1911.03894>`__
 by Louis Martin, Benjamin Muller, Pedro Javier Ortiz Suárez, Yoann Dupont, Laurent Romary, Éric Villemonte de la
 Clergerie, Djamé Seddah, and Benoît Sagot. It is based on Facebook's RoBERTa model released in 2019. It is a model
@@ -24,8 +21,6 @@ Tips:
 
 - This implementation is the same as RoBERTa. Refer to the `documentation of RoBERTa <./roberta.html>`__ for usage
   examples as well as the information relative to the inputs and outputs.
-
-The original code can be found `here <https://camembert-model.fr/>`_.
 
 CamembertConfig
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -77,13 +72,6 @@ CamembertForTokenClassification
     :members:
 
 
-CamembertForQuestionAnswering
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autoclass:: transformers.CamembertForQuestionAnswering
-    :members:
-
-
 TFCamembertModel
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -109,11 +97,4 @@ TFCamembertForTokenClassification
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autoclass:: transformers.TFCamembertForTokenClassification
-    :members:
-
-
-TFCamembertForQuestionAnswering
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autoclass:: transformers.TFCamembertForQuestionAnswering
     :members:

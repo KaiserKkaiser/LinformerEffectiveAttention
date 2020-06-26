@@ -33,13 +33,14 @@ from transformers import BertConfig, BertModel, PreTrainedModel
 
 MAX_SIZE = 5000
 
-BERTABS_FINETUNED_MODEL_ARCHIVE_LIST = [
-    "remi/bertabs-finetuned-cnndm-extractive-abstractive-summarization",
-]
+BERTABS_FINETUNED_MODEL_MAP = {
+    "bertabs-finetuned-cnndm": "https://s3.amazonaws.com/models.huggingface.co/bert/remi/bertabs-finetuned-cnndm-extractive-abstractive-summarization/pytorch_model.bin",
+}
 
 
 class BertAbsPreTrainedModel(PreTrainedModel):
     config_class = BertAbsConfig
+    pretrained_model_archive_map = BERTABS_FINETUNED_MODEL_MAP
     load_tf_weights = False
     base_model_prefix = "bert"
 

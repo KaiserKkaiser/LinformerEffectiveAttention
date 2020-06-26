@@ -22,8 +22,6 @@ class TestActivations(unittest.TestCase):
         get_activation("swish")
         get_activation("relu")
         get_activation("tanh")
-        get_activation("gelu_new")
-        get_activation("gelu_fast")
         with self.assertRaises(KeyError):
             get_activation("bogus")
         with self.assertRaises(KeyError):

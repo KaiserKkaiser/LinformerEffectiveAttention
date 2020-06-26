@@ -15,7 +15,6 @@ import tempfile
 from contextlib import contextmanager
 from functools import partial, wraps
 from hashlib import sha256
-from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse
 from zipfile import ZipFile, is_zipfile
@@ -59,7 +58,6 @@ try:
 except (ImportError, AssertionError):
     _tf_available = False  # pylint: disable=invalid-name
 
-
 try:
     from torch.hub import _get_torch_home
 
@@ -68,27 +66,21 @@ except ImportError:
     torch_cache_home = os.path.expanduser(
         os.getenv("TORCH_HOME", os.path.join(os.getenv("XDG_CACHE_HOME", "~/.cache"), "torch"))
     )
-
-
-try:
-    import torch_xla.core.xla_model as xm
-
-    tpu_device = xm.xla_device()
-
-    if _torch_available:
-        _torch_tpu_available = True  # pylint: disable=
-    else:
-        _torch_tpu_available = False
-except ImportError:
-    _torch_tpu_available = False
-
-
 default_cache_path = os.path.join(torch_cache_home, "transformers")
 
+try:
+    from pathlib import Path
 
-PYTORCH_PRETRAINED_BERT_CACHE = os.getenv("PYTORCH_PRETRAINED_BERT_CACHE", default_cache_path)
-PYTORCH_TRANSFORMERS_CACHE = os.getenv("PYTORCH_TRANSFORMERS_CACHE", PYTORCH_PRETRAINED_BERT_CACHE)
-TRANSFORMERS_CACHE = os.getenv("TRANSFORMERS_CACHE", PYTORCH_TRANSFORMERS_CACHE)
+    PYTORCH_PRETRAINED_BERT_CACHE = Path(
+        os.getenv("PYTORCH_TRANSFORMERS_CACHE", os.getenv("PYTORCH_PRETRAINED_BERT_CACHE", default_cache_path))
+    )
+except (AttributeError, ImportError):
+    PYTORCH_PRETRAINED_BERT_CACHE = os.getenv(
+        "PYTORCH_TRANSFORMERS_CACHE", os.getenv("PYTORCH_PRETRAINED_BERT_CACHE", default_cache_path)
+    )
+
+PYTORCH_TRANSFORMERS_CACHE = PYTORCH_PRETRAINED_BERT_CACHE  # Kept for backward compatibility
+TRANSFORMERS_CACHE = PYTORCH_PRETRAINED_BERT_CACHE  # Kept for backward compatibility
 
 WEIGHTS_NAME = "pytorch_model.bin"
 TF2_WEIGHTS_NAME = "tf_model.h5"
@@ -102,7 +94,7 @@ DUMMY_INPUTS = [[7, 6, 0, 0, 1], [1, 2, 3, 0, 0], [0, 0, 0, 4, 5]]
 DUMMY_MASK = [[1, 1, 1, 1, 1], [1, 1, 1, 0, 0], [0, 0, 0, 1, 1]]
 
 S3_BUCKET_PREFIX = "https://s3.amazonaws.com/models.huggingface.co/bert"
-CLOUDFRONT_DISTRIB_PREFIX = "https://cdn.huggingface.co"
+CLOUDFRONT_DISTRIB_PREFIX = "https://d2ws9o8vfrpkyk.cloudfront.net"
 
 
 def is_torch_available():
@@ -111,10 +103,6 @@ def is_torch_available():
 
 def is_tf_available():
     return _tf_available
-
-
-def is_torch_tpu_available():
-    return _torch_tpu_available
 
 
 def add_start_docstrings(*docstr):
@@ -156,28 +144,12 @@ def is_remote_url(url_or_filename):
     return parsed.scheme in ("http", "https")
 
 
-def hf_bucket_url(model_id: str, filename: str, use_cdn=True) -> str:
-    """
-    Resolve a model identifier, and a file name, to a HF-hosted url
-    on either S3 or Cloudfront (a Content Delivery Network, or CDN).
-
-    Cloudfront is replicated over the globe so downloads are way faster
-    for the end user (and it also lowers our bandwidth costs). However, it
-    is more aggressively cached by default, so may not always reflect the
-    latest changes to the underlying file (default TTL is 24 hours).
-
-    In terms of client-side caching from this library, even though
-    Cloudfront relays the ETags from S3, using one or the other
-    (or switching from one to the other) will affect caching: cached files
-    are not shared between the two because the cached file's name contains
-    a hash of the url.
-    """
-    endpoint = CLOUDFRONT_DISTRIB_PREFIX if use_cdn else S3_BUCKET_PREFIX
-    legacy_format = "/" not in model_id
-    if legacy_format:
-        return f"{endpoint}/{model_id}-{filename}"
+def hf_bucket_url(identifier, postfix=None, cdn=False) -> str:
+    endpoint = CLOUDFRONT_DISTRIB_PREFIX if cdn else S3_BUCKET_PREFIX
+    if postfix is None:
+        return "/".join((endpoint, identifier))
     else:
-        return f"{endpoint}/{model_id}/{filename}"
+        return "/".join((endpoint, identifier, postfix))
 
 
 def url_to_filename(url, etag=None):
