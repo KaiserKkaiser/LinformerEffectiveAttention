@@ -302,6 +302,8 @@ class BertEffectiveLinformerSelfAttention(nn.Module):
         self.key = nn.Linear(config.hidden_size, self.all_head_size)
         self.value = nn.Linear(config.hidden_size, self.all_head_size)
         self.E = E
+        # If k = d, use svd, or else the nullity is 0
+        self.use_SVD = (int(config.hidden_size) == int(config.k_value))
         self.dropout = nn.Dropout(config.attention_probs_dropout_prob)
 
     def transpose_for_scores(self, x):
@@ -349,31 +351,32 @@ class BertEffectiveLinformerSelfAttention(nn.Module):
         # This is actually dropping out entire tokens to attend to, which might
         # seem a bit unusual, but is taken from the original Transformer paper.
         attention_probs = self.dropout(attention_probs)
-
-        ### Here, effective attention begins
-        ## Calculate Project_(LN(T))(A)
-        # Compute T
-        T = value_layer
-        # Make a SVD of T, U(dimension: [batch_size, hidden_size, hidden_size], [d_s, d_s]
-        # S(dimension: square, and is of min(hidden_size, all_head_size), min(d_s, d))
-        U, S, V = torch.Tensor.svd(T, some=False, compute_uv=True)
-        # Find the bound of S, when S value less than bound, we treat it as a 0
-        bound = torch.finfo(S.dtype).eps * max(U.shape[1], V.shape[1])
-        # Find the basis of LN(T), null_space dimension: [batch_size, hidden_size, hidden_size - rank], [d_s, d_s-r]
-        basis_start_index = torch.max(torch.sum(S>bound, dtype=int, axis=2))
-        null_space = U[:, :, :, basis_start_index:]
-        # pdb.set_trace()
-        # TODO: Need to make sure if this is applicable to batches; Need to make sure the start_index is correct
-        # Multiply attention with null_space, dimension: [batch_size, hidden_size, hidden_size - rank], [d_s, d_s-r]
-        B = torch.matmul(attention_probs, null_space)
-        # Transpose B [batch_size, hidden_size - rank, hidden_size]
-        transpose_B = torch.transpose(B, -1, -2)
-        # Multiply null_space and transposed B [batch_size, hidden_size, hiddensize]
-        projection_attention = torch.matmul(null_space, transpose_B)
-        # Then do tranpose for projection of LN(T)
-        projection_attention = torch.transpose(projection_attention, -1, -2)
-        # Compute the effective attention
-        effec_attention_probs = torch.sub(attention_probs, projection_attention)
+    
+        if self.use_SVD:
+            ### Here, effective attention begins
+            ## Calculate Project_(LN(T))(A)
+            # Compute T
+            T = value_layer
+            # Make a SVD of T, U(dimension: [batch_size, hidden_size, hidden_size], [d_s, d_s]
+            # S(dimension: square, and is of min(hidden_size, all_head_size), min(d_s, d))
+            U, S, V = torch.Tensor.svd(T, some=False, compute_uv=True)
+            # Find the bound of S, when S value less than bound, we treat it as a 0
+            bound = torch.finfo(S.dtype).eps * max(U.shape[1], V.shape[1])
+            # Find the basis of LN(T), null_space dimension: [batch_size, hidden_size, hidden_size - rank], [d_s, d_s-r]
+            basis_start_index = torch.max(torch.sum(S>bound, dtype=int, axis=2))
+            null_space = U[:, :, :, basis_start_index:]
+            # Multiply attention with null_space, dimension: [batch_size, hidden_size, hidden_size - rank], [d_s, d_s-r]
+            B = torch.matmul(attention_probs, null_space)
+            # Transpose B [batch_size, hidden_size - rank, hidden_size]
+            transpose_B = torch.transpose(B, -1, -2)
+            # Multiply null_space and transposed B [batch_size, hidden_size, hiddensize]
+            projection_attention = torch.matmul(null_space, transpose_B)
+            # Then do tranpose for projection of LN(T)
+            projection_attention = torch.transpose(projection_attention, -1, -2)
+            # Compute the effective attention
+            effec_attention_probs = torch.sub(attention_probs, projection_attention)
+        else:
+            effec_attention_probs = attention_probs
 
         # Mask heads if we want to
         if head_mask is not None:
