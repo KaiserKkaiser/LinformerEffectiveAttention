@@ -70,7 +70,11 @@ def main():
     # We now keep distinct sets of args, for a cleaner separation of concerns.
 
     parser = HfArgumentParser((ModelArguments, GlueDataTrainingArguments, TrainingArguments))
-    model_args, data_args, training_args = parser.parse_args_into_dataclasses()
+    # model_args, data_args, training_args = parser.parse_args_into_dataclasses()
+    model_args, data_args, training_args, remaining_args = parser.parse_args_into_dataclasses(return_remaining_strings=True)
+    # Reading the attention type and k_values
+    attention_type = remaining_args[-3]
+    k_value = remaining_args[-1]
 
     if (
         os.path.exists(training_args.output_dir)
@@ -119,6 +123,8 @@ def main():
         finetuning_task=data_args.task_name,
         cache_dir=model_args.cache_dir,
     )
+    config.attention_type = attention_type
+    config.k_value = k_value
     tokenizer = AutoTokenizer.from_pretrained(
         model_args.tokenizer_name if model_args.tokenizer_name else model_args.model_name_or_path,
         cache_dir=model_args.cache_dir,
