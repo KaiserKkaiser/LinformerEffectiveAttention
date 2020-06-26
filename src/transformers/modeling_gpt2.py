@@ -17,8 +17,8 @@
 
 
 import logging
-import math
 import os
+import warnings
 
 import torch
 import torch.nn as nn
@@ -27,18 +27,25 @@ from torch.nn import CrossEntropyLoss
 from .activations import ACT2FN
 from .configuration_gpt2 import GPT2Config
 from .file_utils import add_start_docstrings, add_start_docstrings_to_callable
-from .modeling_utils import Conv1D, PreTrainedModel, SequenceSummary, prune_conv1d_layer
+from .modeling_utils import (
+    Conv1D,
+    PreTrainedModel,
+    SequenceSummary,
+    find_pruneable_heads_and_indices,
+    prune_conv1d_layer,
+)
 
 
 logger = logging.getLogger(__name__)
 
-GPT2_PRETRAINED_MODEL_ARCHIVE_MAP = {
-    "gpt2": "https://s3.amazonaws.com/models.huggingface.co/bert/gpt2-pytorch_model.bin",
-    "gpt2-medium": "https://s3.amazonaws.com/models.huggingface.co/bert/gpt2-medium-pytorch_model.bin",
-    "gpt2-large": "https://s3.amazonaws.com/models.huggingface.co/bert/gpt2-large-pytorch_model.bin",
-    "gpt2-xl": "https://s3.amazonaws.com/models.huggingface.co/bert/gpt2-xl-pytorch_model.bin",
-    "distilgpt2": "https://s3.amazonaws.com/models.huggingface.co/bert/distilgpt2-pytorch_model.bin",
-}
+GPT2_PRETRAINED_MODEL_ARCHIVE_LIST = [
+    "gpt2",
+    "gpt2-medium",
+    "gpt2-large",
+    "gpt2-xl",
+    "distilgpt2",
+    # See all GPT-2 models at https://huggingface.co/models?filter=gpt2
+]
 
 
 def load_tf_weights_in_gpt2(model, config, gpt2_checkpoint_path):
@@ -99,7 +106,6 @@ def load_tf_weights_in_gpt2(model, config, gpt2_checkpoint_path):
 class Attention(nn.Module):
     def __init__(self, nx, n_ctx, config, scale=False):
         super().__init__()
-        self.output_attentions = config.output_attentions
 
         n_state = nx  # in Attention: n_state=768 (nx=n_embd)
         # [switch nx => n_state from Block to Attention to keep identical to TF implem]
@@ -121,14 +127,9 @@ class Attention(nn.Module):
     def prune_heads(self, heads):
         if len(heads) == 0:
             return
-        mask = torch.ones(self.n_head, self.split_size // self.n_head)
-        heads = set(heads) - self.pruned_heads  # Convert to set and emove already pruned heads
-        for head in heads:
-            # Compute how many pruned heads are before the head and move the index accordingly
-            head = head - sum(1 if h < head else 0 for h in self.pruned_heads)
-            mask[head] = 0
-        mask = mask.view(-1).contiguous().eq(1)
-        index = torch.arange(len(mask))[mask].long()
+        heads, index = find_pruneable_heads_and_indices(
+            heads, self.n_head, self.split_size // self.n_head, self.pruned_heads
+        )
         index_attn = torch.cat([index, index + self.split_size, index + (2 * self.split_size)])
 
         # Prune conv1d layers
@@ -140,13 +141,13 @@ class Attention(nn.Module):
         self.n_head = self.n_head - len(heads)
         self.pruned_heads = self.pruned_heads.union(heads)
 
-    def _attn(self, q, k, v, attention_mask=None, head_mask=None):
+    def _attn(self, q, k, v, attention_mask=None, head_mask=None, output_attentions=False):
         w = torch.matmul(q, k)
         if self.scale:
-            w = w / math.sqrt(v.size(-1))
+            w = w / (float(v.size(-1)) ** 0.5)
         nd, ns = w.size(-2), w.size(-1)
         mask = self.bias[:, :, ns - nd : ns, :ns]
-        w = torch.where(mask, w, self.masked_bias)
+        w = torch.where(mask.bool(), w, self.masked_bias.to(w.dtype))
 
         if attention_mask is not None:
             # Apply the attention mask
@@ -160,7 +161,7 @@ class Attention(nn.Module):
             w = w * head_mask
 
         outputs = [torch.matmul(w, v)]
-        if self.output_attentions:
+        if output_attentions:
             outputs.append(w)
         return outputs
 
@@ -177,7 +178,9 @@ class Attention(nn.Module):
         else:
             return x.permute(0, 2, 1, 3)  # (batch, head, seq_length, head_features)
 
-    def forward(self, x, layer_past=None, attention_mask=None, head_mask=None, use_cache=False):
+    def forward(
+        self, x, layer_past=None, attention_mask=None, head_mask=None, use_cache=False, output_attentions=False
+    ):
         x = self.c_attn(x)
         query, key, value = x.split(self.split_size, dim=2)
         query = self.split_heads(query)
@@ -193,7 +196,7 @@ class Attention(nn.Module):
         else:
             present = (None,)
 
-        attn_outputs = self._attn(query, key, value, attention_mask, head_mask)
+        attn_outputs = self._attn(query, key, value, attention_mask, head_mask, output_attentions)
         a = attn_outputs[0]
 
         a = self.merge_heads(a)
@@ -228,13 +231,16 @@ class Block(nn.Module):
         self.ln_2 = nn.LayerNorm(nx, eps=config.layer_norm_epsilon)
         self.mlp = MLP(4 * nx, config)
 
-    def forward(self, x, layer_past=None, attention_mask=None, head_mask=None, use_cache=False):
+    def forward(
+        self, x, layer_past=None, attention_mask=None, head_mask=None, use_cache=False, output_attentions=False,
+    ):
         output_attn = self.attn(
             self.ln_1(x),
             layer_past=layer_past,
             attention_mask=attention_mask,
             head_mask=head_mask,
             use_cache=use_cache,
+            output_attentions=output_attentions,
         )
         a = output_attn[0]  # output_attn: a, present, (attentions)
 
@@ -252,7 +258,6 @@ class GPT2PreTrainedModel(PreTrainedModel):
     """
 
     config_class = GPT2Config
-    pretrained_model_archive_map = GPT2_PRETRAINED_MODEL_ARCHIVE_MAP
     load_tf_weights = load_tf_weights_in_gpt2
     base_model_prefix = "transformer"
 
@@ -287,9 +292,11 @@ GPT2_START_DOCSTRING = r"""
 
 GPT2_INPUTS_DOCSTRING = r"""
     Args:
-        input_ids (:obj:`torch.LongTensor` of shape :obj:`(batch_size, sequence_length)`):
+        input_ids (:obj:`torch.LongTensor` of shape :obj:`(batch_size, input_ids_length)`):
+            :obj:`input_ids_length` = ``sequence_length`` if ``past`` is ``None`` else ``past[0].shape[-2]`` (``sequence_length`` of input past key value states).
             Indices of input sequence tokens in the vocabulary.
-            If `past` is used, optionally only the last `input_ids` have to be input (see `past`).
+
+            If `past` is used, only `input_ids` that do not have their past calculated should be passed as `input_ids`.
 
             Indices can be obtained using :class:`transformers.GPT2Tokenizer`.
             See :func:`transformers.PreTrainedTokenizer.encode` and
@@ -300,7 +307,7 @@ GPT2_INPUTS_DOCSTRING = r"""
         past (:obj:`List[torch.FloatTensor]` of length :obj:`config.n_layers`):
             Contains pre-computed hidden-states (key and values in the attention blocks) as computed by the model
             (see `past` output below). Can be used to speed up sequential decoding.
-            If `past` is used, the user can optionally input only the last `input_ids` (those that don't have their past given to this model) of shape :obj:`(batch_size, 1)` instead of all `input_ids` of shape :obj:`(batch_size, sequence_length)`.
+            The `input_ids` which have their past given to this model should not be passed as `input_ids` as they have already been computed.
         attention_mask (:obj:`torch.FloatTensor` of shape :obj:`(batch_size, sequence_length)`, `optional`, defaults to :obj:`None`):
             Mask to avoid performing attention on padding token indices.
             Mask values selected in ``[0, 1]``:
@@ -312,8 +319,6 @@ GPT2_INPUTS_DOCSTRING = r"""
             Segment token indices to indicate first and second portions of the inputs.
             Indices are selected in ``[0, 1]``: ``0`` corresponds to a `sentence A` token, ``1``
             corresponds to a `sentence B` token
-            If `past` is used, optionally only the last `token_type_ids` have to be input (see `past`).
-
             `What are token type IDs? <../glossary.html#token-type-ids>`_
         position_ids (:obj:`torch.LongTensor` of shape :obj:`(batch_size, sequence_length)`, `optional`, defaults to :obj:`None`):
             Indices of positions of each input sequence tokens in the position embeddings.
@@ -324,11 +329,10 @@ GPT2_INPUTS_DOCSTRING = r"""
             Mask to nullify selected heads of the self-attention modules.
             Mask values selected in ``[0, 1]``:
             :obj:`1` indicates the head is **not masked**, :obj:`0` indicates the head is **masked**.
-        input_embeds (:obj:`torch.FloatTensor` of shape :obj:`(batch_size, sequence_length, hidden_size)`, `optional`, defaults to :obj:`None`):
-            Optionally, instead of passing :obj:`input_ids` you can choose to directly pass an embedded representation.
+        inputs_embeds (:obj:`torch.FloatTensor` of shape :obj:`(batch_size, sequence_length, hidden_size)`, `optional`, defaults to :obj:`None`):
             This is useful if you want more control over how to convert `input_ids` indices into associated vectors
             than the model's internal embedding lookup matrix.
-            If `past` is used, optionally only the last `input_embeds` have to be input (see `past`).
+            If `past` is used, optionally only the last `inputs_embeds` have to be input (see `past`).
         use_cache (:obj:`bool`):
             If `use_cache` is True, `past` key value states are returned and can be used to speed up decoding (see `past`). Defaults to `True`.
 """
@@ -342,7 +346,6 @@ class GPT2Model(GPT2PreTrainedModel):
     def __init__(self, config):
         super().__init__(config)
         self.output_hidden_states = config.output_hidden_states
-        self.output_attentions = config.output_attentions
 
         self.wte = nn.Embedding(config.vocab_size, config.n_embd)
         self.wpe = nn.Embedding(config.n_positions, config.n_embd)
@@ -376,6 +379,7 @@ class GPT2Model(GPT2PreTrainedModel):
         head_mask=None,
         inputs_embeds=None,
         use_cache=True,
+        output_attentions=None,
     ):
         r"""
     Return:
@@ -391,7 +395,7 @@ class GPT2Model(GPT2PreTrainedModel):
             of shape :obj:`(batch_size, sequence_length, hidden_size)`.
 
             Hidden-states of the model at the output of each layer plus the initial embedding outputs.
-        attentions (:obj:`tuple(torch.FloatTensor)`, `optional`, returned when ``config.output_attentions=True``):
+        attentions (:obj:`tuple(torch.FloatTensor)`, `optional`, returned when ``output_attentions=True``):
             Tuple of :obj:`torch.FloatTensor` (one for each layer) of shape
             :obj:`(batch_size, num_heads, sequence_length, sequence_length)`.
 
@@ -410,16 +414,7 @@ class GPT2Model(GPT2PreTrainedModel):
         last_hidden_states = outputs[0]  # The last hidden-state is the first element of the output tuple
 
         """
-
-        # If using past key value states, only the last tokens
-        # should be given as an input
-        if past is not None:
-            if input_ids is not None:
-                input_ids = input_ids[:, -1:]
-            if inputs_embeds is not None:
-                inputs_embeds = inputs_embeds[:, -1:]
-            if token_type_ids is not None:
-                token_type_ids = token_type_ids[:, -1:]
+        output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
 
         if input_ids is not None and inputs_embeds is not None:
             raise ValueError("You cannot specify both input_ids and inputs_embeds at the same time")
@@ -498,13 +493,14 @@ class GPT2Model(GPT2PreTrainedModel):
                 attention_mask=attention_mask,
                 head_mask=head_mask[i],
                 use_cache=use_cache,
+                output_attentions=output_attentions,
             )
 
             hidden_states, present = outputs[:2]
             if use_cache is True:
                 presents = presents + (present,)
 
-            if self.output_attentions:
+            if output_attentions:
                 all_attentions.append(outputs[2])
 
         hidden_states = self.ln_f(hidden_states)
@@ -519,7 +515,7 @@ class GPT2Model(GPT2PreTrainedModel):
             outputs = outputs + (presents,)
         if self.output_hidden_states:
             outputs = outputs + (all_hidden_states,)
-        if self.output_attentions:
+        if output_attentions:
             # let the number of heads free (-1) so we can extract attention even after head pruning
             attention_output_shape = input_shape[:-1] + (-1,) + all_attentions[0].shape[-2:]
             all_attentions = tuple(t.view(*attention_output_shape) for t in all_attentions)
@@ -562,11 +558,12 @@ class GPT2LMHeadModel(GPT2PreTrainedModel):
         inputs_embeds=None,
         labels=None,
         use_cache=True,
+        output_attentions=None,
     ):
         r"""
         labels (:obj:`torch.LongTensor` of shape :obj:`(batch_size, sequence_length)`, `optional`, defaults to :obj:`None`):
             Labels for language modeling.
-            Note that the labels **are shifted** inside the model, i.e. you can set ``lm_labels = input_ids``
+            Note that the labels **are shifted** inside the model, i.e. you can set ``labels = input_ids``
             Indices are selected in ``[-100, 0, ..., config.vocab_size]``
             All labels set to ``-100`` are ignored (masked), the loss is only
             computed for labels in ``[0, ..., config.vocab_size]``
@@ -585,7 +582,7 @@ class GPT2LMHeadModel(GPT2PreTrainedModel):
             of shape :obj:`(batch_size, sequence_length, hidden_size)`.
 
             Hidden-states of the model at the output of each layer plus the initial embedding outputs.
-        attentions (:obj:`tuple(torch.FloatTensor)`, `optional`, returned when ``config.output_attentions=True``):
+        attentions (:obj:`tuple(torch.FloatTensor)`, `optional`, returned when ``output_attentions=True``):
             Tuple of :obj:`torch.FloatTensor` (one for each layer) of shape
             :obj:`(batch_size, num_heads, sequence_length, sequence_length)`.
 
@@ -614,6 +611,7 @@ class GPT2LMHeadModel(GPT2PreTrainedModel):
             head_mask=head_mask,
             inputs_embeds=inputs_embeds,
             use_cache=use_cache,
+            output_attentions=output_attentions,
         )
         hidden_states = transformer_outputs[0]
 
@@ -664,17 +662,19 @@ class GPT2DoubleHeadsModel(GPT2PreTrainedModel):
         head_mask=None,
         inputs_embeds=None,
         mc_token_ids=None,
-        lm_labels=None,
+        labels=None,
         mc_labels=None,
         use_cache=True,
+        output_attentions=None,
+        **kwargs
     ):
         r"""
         mc_token_ids (:obj:`torch.LongTensor` of shape :obj:`(batch_size, num_choices)`, `optional`, default to index of the last token of the input)
             Index of the classification token in each input sequence.
             Selected in the range ``[0, input_ids.size(-1) - 1[``.
-        lm_labels (:obj:`torch.LongTensor` of shape :obj:`(batch_size, sequence_length)`, `optional`, defaults to :obj:`None`)
+        labels (:obj:`torch.LongTensor` of shape :obj:`(batch_size, sequence_length)`, `optional`, defaults to :obj:`None`)
             Labels for language modeling.
-            Note that the labels **are shifted** inside the model, i.e. you can set ``lm_labels = input_ids``
+            Note that the labels **are shifted** inside the model, i.e. you can set ``labels = input_ids``
             Indices are selected in ``[-1, 0, ..., config.vocab_size]``
             All labels set to ``-100`` are ignored (masked), the loss is only
             computed for labels in ``[0, ..., config.vocab_size]``
@@ -682,12 +682,14 @@ class GPT2DoubleHeadsModel(GPT2PreTrainedModel):
             Labels for computing the multiple choice classification loss.
             Indices should be in ``[0, ..., num_choices]`` where `num_choices` is the size of the second dimension
             of the input tensors. (see `input_ids` above)
+        kwargs (:obj:`Dict[str, any]`, optional, defaults to `{}`):
+            Used to hide legacy arguments that have been deprecated.
 
     Return:
         :obj:`tuple(torch.FloatTensor)` comprising various elements depending on the configuration (:class:`~transformers.GPT2Config`) and inputs:
-        lm_loss (:obj:`torch.FloatTensor` of shape :obj:`(1,)`, `optional`, returned when ``lm_labels`` is provided):
+        lm_loss (:obj:`torch.FloatTensor` of shape :obj:`(1,)`, `optional`, returned when ``labels`` is provided):
             Language modeling loss.
-        mc_loss (:obj:`torch.FloatTensor` of shape :obj:`(1,)`, `optional`, returned when :obj:`multiple_choice_labels` is provided):
+        mc_loss (:obj:`torch.FloatTensor` of shape :obj:`(1,)`, `optional`, returned when :obj:`mc_labels` is provided):
             Multiple choice classification loss.
         lm_prediction_scores (:obj:`torch.FloatTensor` of shape :obj:`(batch_size, num_choices, sequence_length, config.vocab_size)`):
             Prediction scores of the language modeling head (scores for each vocabulary token before SoftMax).
@@ -701,7 +703,7 @@ class GPT2DoubleHeadsModel(GPT2PreTrainedModel):
             of shape :obj:`(batch_size, sequence_length, hidden_size)`.
 
             Hidden-states of the model at the output of each layer plus the initial embedding outputs.
-        attentions (:obj:`tuple(torch.FloatTensor)`, `optional`, returned when ``config.output_attentions=True``):
+        attentions (:obj:`tuple(torch.FloatTensor)`, `optional`, returned when ``output_attentions=True``):
             Tuple of :obj:`torch.FloatTensor` (one for each layer) of shape
             :obj:`(batch_size, num_heads, sequence_length, sequence_length)`.
 
@@ -732,6 +734,14 @@ class GPT2DoubleHeadsModel(GPT2PreTrainedModel):
         lm_prediction_scores, mc_prediction_scores = outputs[:2]
 
         """
+        if "lm_labels" in kwargs:
+            warnings.warn(
+                "The `lm_labels` argument is deprecated and will be removed in a future version, use `labels` instead.",
+                DeprecationWarning,
+            )
+            labels = kwargs.pop("lm_labels")
+        assert kwargs == {}, f"Unexpected keyword arguments: {list(kwargs.keys())}."
+
         transformer_outputs = self.transformer(
             input_ids,
             past=past,
@@ -741,6 +751,7 @@ class GPT2DoubleHeadsModel(GPT2PreTrainedModel):
             head_mask=head_mask,
             inputs_embeds=inputs_embeds,
             use_cache=use_cache,
+            output_attentions=output_attentions,
         )
 
         hidden_states = transformer_outputs[0]
@@ -753,9 +764,9 @@ class GPT2DoubleHeadsModel(GPT2PreTrainedModel):
             loss_fct = CrossEntropyLoss()
             loss = loss_fct(mc_logits.view(-1, mc_logits.size(-1)), mc_labels.view(-1))
             outputs = (loss,) + outputs
-        if lm_labels is not None:
+        if labels is not None:
             shift_logits = lm_logits[..., :-1, :].contiguous()
-            shift_labels = lm_labels[..., 1:].contiguous()
+            shift_labels = labels[..., 1:].contiguous()
             loss_fct = CrossEntropyLoss()
             loss = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
             outputs = (loss,) + outputs

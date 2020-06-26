@@ -1,5 +1,5 @@
 # Initially taken from Github's Python gitignore file
-
+glue_data/
 # MAC files
 .DS_Store
 
