@@ -124,7 +124,7 @@ def main():
         cache_dir=model_args.cache_dir,
     )
     config.attention_type = attention_type
-    config.k_value = k_value
+    config.k_value = int(k_value)
     tokenizer = AutoTokenizer.from_pretrained(
         model_args.tokenizer_name if model_args.tokenizer_name else model_args.model_name_or_path,
         cache_dir=model_args.cache_dir,

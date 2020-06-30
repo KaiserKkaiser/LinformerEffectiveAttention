@@ -216,7 +216,6 @@ class Trainer:
                 If present, we will try reloading the optimizer/scheduler states from there.
         """
         train_dataloader = self.get_train_dataloader()
-
         if self.args.max_steps > 0:
             t_total = self.args.max_steps
             num_train_epochs = (
