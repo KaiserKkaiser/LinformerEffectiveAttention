@@ -302,7 +302,7 @@ class BertEffectiveLinformerSelfAttention(nn.Module):
         self.value = nn.Linear(config.hidden_size, self.all_head_size)
         self.E = E
         # If k = d, use svd, or else the nullity is 0
-        self.use_SVD = (self.attention_head_size == int(config.k_value))
+        self.use_SVD = (self.attention_head_size != int(config.k_value))
         self.dropout = nn.Dropout(config.attention_probs_dropout_prob)
 
     def transpose_for_scores(self, x):
@@ -331,19 +331,21 @@ class BertEffectiveLinformerSelfAttention(nn.Module):
         else:
             mixed_key_layer = self.key(hidden_states)
             mixed_value_layer = self.value(hidden_states)
-        
+        # mixed_key_layer = torch.transpose(self.E(torch.transpose(mixed_key_layer, -1, -2)), -1, -2)
+        # mixed_value_layer = torch.transpose(self.E(torch.transpose(mixed_value_layer, -1, -2)), -1, -2)
+
         query_layer = self.transpose_for_scores(mixed_query_layer)
         key_layer = self.transpose_for_scores(mixed_key_layer)
-        # key_layer = torch.transpose(self.E(torch.transpose(key_layer, -1, -2)), -1, -2)
+        key_layer = torch.transpose(self.E(torch.transpose(key_layer, -1, -2)), -1, -2)
         value_layer = self.transpose_for_scores(mixed_value_layer)
         value_layer = torch.transpose(self.E(torch.transpose(value_layer, -1, -2)), -1, -2)
+        pdb.set_trace()
         # Take the dot product between "query" and "key" to get the raw attention scores.
         attention_scores = torch.matmul(query_layer, key_layer.transpose(-1, -2))
         attention_scores = attention_scores / math.sqrt(self.attention_head_size)
-        if attention_mask is not None:
-            # Apply the attention mask is (precomputed for all layers in BertModel forward() function)
-            attention_scores = attention_scores + attention_mask
-        attention_scores = self.E(attention_scores)
+        # if attention_mask is not None:
+        #     # Apply the attention mask is (precomputed for all layers in BertModel forward() function)
+        #     attention_scores = attention_scores + attention_mask[:, :, :, :self.E.weight.shape[0]]
         # Normalize the attention scores to probabilities.
         attention_probs = nn.Softmax(dim=-1)(attention_scores) # Matrix A in the paper
 
