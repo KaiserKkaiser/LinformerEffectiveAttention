@@ -331,21 +331,19 @@ class BertEffectiveLinformerSelfAttention(nn.Module):
         else:
             mixed_key_layer = self.key(hidden_states)
             mixed_value_layer = self.value(hidden_states)
-        # mixed_key_layer = torch.transpose(self.E(torch.transpose(mixed_key_layer, -1, -2)), -1, -2)
-        # mixed_value_layer = torch.transpose(self.E(torch.transpose(mixed_value_layer, -1, -2)), -1, -2)
+        mixed_key_layer = torch.transpose(self.E(torch.transpose(mixed_key_layer, -1, -2)), -1, -2)
+        mixed_value_layer = torch.transpose(self.E(torch.transpose(mixed_value_layer, -1, -2)), -1, -2)
+        pdb.set_trace()
 
         query_layer = self.transpose_for_scores(mixed_query_layer)
         key_layer = self.transpose_for_scores(mixed_key_layer)
-        key_layer = torch.transpose(self.E(torch.transpose(key_layer, -1, -2)), -1, -2)
         value_layer = self.transpose_for_scores(mixed_value_layer)
-        value_layer = torch.transpose(self.E(torch.transpose(value_layer, -1, -2)), -1, -2)
-        pdb.set_trace()
         # Take the dot product between "query" and "key" to get the raw attention scores.
         attention_scores = torch.matmul(query_layer, key_layer.transpose(-1, -2))
         attention_scores = attention_scores / math.sqrt(self.attention_head_size)
-        # if attention_mask is not None:
-        #     # Apply the attention mask is (precomputed for all layers in BertModel forward() function)
-        #     attention_scores = attention_scores + attention_mask[:, :, :, :self.E.weight.shape[0]]
+        if attention_mask is not None:
+            # Apply the attention mask is (precomputed for all layers in BertModel forward() function)
+            attention_scores = attention_scores + attention_mask[:, :, :, :self.E.weight.shape[0]]
         # Normalize the attention scores to probabilities.
         attention_probs = nn.Softmax(dim=-1)(attention_scores) # Matrix A in the paper
 
