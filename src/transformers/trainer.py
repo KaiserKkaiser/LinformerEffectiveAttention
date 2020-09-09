@@ -523,8 +523,8 @@ class Trainer:
         label_ids: np.ndarray = None
         model.eval()
 
-        avg_attentions_CLS = torch.zeros([12, 8, 12], dtype=torch.float64)
-        avg_attentions_SEP = torch.zeros([12, 8, 12], dtype=torch.float64)
+        avg_attentions_CLS = torch.zeros([12, 12], dtype=torch.float64)
+        avg_attentions_SEP = torch.zeros([12, 12], dtype=torch.float64)
         count = 0
 
         for inputs in tqdm(dataloader, desc=description):
@@ -535,7 +535,6 @@ class Trainer:
 
             # Record the position of [SEP]
             sep_indices = np.where(inputs["input_ids"].numpy() == 102)
-
             with torch.no_grad():
                 outputs = model(**inputs)
                 # Code for Analysis
@@ -543,10 +542,15 @@ class Trainer:
                     # Loop over the layer
                     # Shape of avg_attention_CLS[i, :, :]=[12, batch_size, 12]
                     # 0 for [CLS]
-                    avg_attentions_CLS[i, :, :] += torch.mean(outputs[2][i], dim=-2)[:, :, 0]
-                    # There are two [SEP]s in an encoded list for MRPC
-                    for j in range(dataloader.batch_size):
-                        avg_attentions_SEP[i, j, :] += (torch.mean(outputs[2][i], dim=-2)[j, :, sep_indices[1][j * 2]] + torch.mean(outputs[2][i], dim=-2)[j, :, sep_indices[1][j * 2 + 1]]) / 2
+                    avg_attentions_CLS[i, :] += torch.mean(torch.mean(outputs[2][i], dim=-2)[:, :, 0], dim=-2)
+                    attention_SEP_over_batches = torch.zeros([outputs[2][i].shape[0], outputs[2][i].shape[1]]) # [8, 12] in our case
+                    for j in range(outputs[2][i].shape[0]):
+                        if sep_indices[0].size == 1 or (sep_indices[0].size > 1 and sep_indices[0][0] != sep_indices[0][1]):
+                            # Check if there are two [SEP]s
+                            attention_SEP_over_batches[j, :] += torch.mean(outputs[2][i], dim=-2)[j, :, sep_indices[1][j]]
+                        else:
+                            attention_SEP_over_batches[j, :] += (torch.mean(outputs[2][i], dim=-2)[j, :, sep_indices[1][j * 2]] + torch.mean(outputs[2][i], dim=-2)[j, :, sep_indices[1][j * 2 + 1]]) / 2
+                    avg_attentions_SEP[i, :] += torch.mean(attention_SEP_over_batches, dim=-2)
 
                 if has_labels:
                     step_eval_loss, logits = outputs[:2]
@@ -568,26 +572,25 @@ class Trainer:
         # Averaged over number of data and batch
         avg_attentions_CLS /= count
         avg_attentions_SEP /= count
-        avg_attentions_CLS_without_batch = torch.mean(avg_attentions_CLS, dim=-2)
-        avg_attentions_SEP_without_batch = torch.mean(avg_attentions_SEP, dim=-2)
-        attention_type = "standard"
-        torch.save(avg_attentions_CLS_without_batch, '/mnt/c/Users/kaise/Desktop/researchData/' + attention_type + '_CLS_MRPC.pt')
-        torch.save(avg_attentions_SEP_without_batch, '/mnt/c/Users/kaise/Desktop/researchData/' + attention_type + 'SEP_MRPC.pt')
+        attention_type = "effective"
+        dataset = 'QNLI'
+        torch.save(avg_attentions_CLS, '/mnt/c/Users/kaise/Desktop/researchData/' + dataset + '/' + attention_type + '_CLS_' + dataset + '.pt')
+        torch.save(avg_attentions_SEP, '/mnt/c/Users/kaise/Desktop/researchData/' + dataset + '/' + attention_type + 'SEP_' + dataset + '.pt')
         plt.figure()
-        plt.imshow(avg_attentions_CLS_without_batch.numpy(), vmin=0, vmax=1.0, cmap='Greens')
+        plt.imshow(avg_attentions_CLS.numpy(), vmin=0, vmax=1.0, cmap='Greens')
         plt.colorbar()
         plt.ylabel("Layer")
         plt.xlabel("Head")
         plt.title(attention_type + "[CLS]")
-        plt.savefig('/mnt/c/Users/kaise/Desktop/researchData/' + attention_type + '_CLS_MRPC.png')
+        plt.savefig('/mnt/c/Users/kaise/Desktop/researchData/' + dataset + '/' + attention_type + '_CLS_' + dataset + '.png')
 
         plt.figure()
-        plt.imshow(avg_attentions_SEP_without_batch.numpy(), vmin=0, vmax=1.0, cmap='Greens')
+        plt.imshow(avg_attentions_SEP.numpy(), vmin=0, vmax=1.0, cmap='Greens')
         plt.title(attention_type + "[SEP]")
         plt.ylabel("Layer")
         plt.xlabel("Head")
         plt.colorbar()
-        plt.savefig('/mnt/c/Users/kaise/Desktop/researchData/' + attention_type + '_SEP_MRPC.png')
+        plt.savefig('/mnt/c/Users/kaise/Desktop/researchData/' + dataset + '/' + attention_type + '_SEP_' + dataset + '.png')
 
         if self.compute_metrics is not None and preds is not None and label_ids is not None:
             metrics = self.compute_metrics(EvalPrediction(predictions=preds, label_ids=label_ids))
