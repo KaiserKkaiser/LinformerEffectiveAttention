@@ -538,19 +538,31 @@ class Trainer:
             with torch.no_grad():
                 outputs = model(**inputs)
                 # Code for Analysis
-                for i in range(12):
+                for layer in range(12):
                     # Loop over the layer
                     # Shape of avg_attention_CLS[i, :, :]=[12, batch_size, 12]
                     # 0 for [CLS]
-                    avg_attentions_CLS[i, :] += torch.mean(torch.mean(outputs[2][i], dim=-2)[:, :, 0], dim=-2)
-                    attention_SEP_over_batches = torch.zeros([outputs[2][i].shape[0], outputs[2][i].shape[1]]) # [8, 12] in our case
-                    for j in range(outputs[2][i].shape[0]):
-                        if sep_indices[0].size == 1 or (sep_indices[0].size > 1 and sep_indices[0][0] != sep_indices[0][1]):
-                            # Check if there are two [SEP]s
-                            attention_SEP_over_batches[j, :] += torch.mean(outputs[2][i], dim=-2)[j, :, sep_indices[1][j]]
-                        else:
-                            attention_SEP_over_batches[j, :] += (torch.mean(outputs[2][i], dim=-2)[j, :, sep_indices[1][j * 2]] + torch.mean(outputs[2][i], dim=-2)[j, :, sep_indices[1][j * 2 + 1]]) / 2
-                    avg_attentions_SEP[i, :] += torch.mean(attention_SEP_over_batches, dim=-2)
+                    if self.args.plot_fig == 6:
+                        avg_attentions_CLS[layer, :] += torch.mean(torch.mean(outputs[2][layer], dim=-2)[:, :, 0], dim=-2)
+                        attention_SEP_over_batches = torch.zeros([outputs[2][layer].shape[0], outputs[2][layer].shape[1]]) # [8, 12] in our case
+                        for j in range(outputs[2][layer].shape[0]):
+                            if sep_indices[0].size == 1 or (sep_indices[0].size > 1 and sep_indices[0][0] != sep_indices[0][1]):
+                                # One [SEP]
+                                attention_SEP_over_batches[j, :] += torch.mean(outputs[2][layer], dim=-2)[j, :, sep_indices[1][j]]
+                            else:
+                                # Two [SEP]
+                                attention_SEP_over_batches[j, :] += (torch.mean(outputs[2][layer], dim=-2)[j, :, sep_indices[1][j * 2]] + torch.mean(outputs[2][layer], dim=-2)[j, :, sep_indices[1][j * 2 + 1]]) / 2
+                        avg_attentions_SEP[layer, :] += torch.mean(attention_SEP_over_batches, dim=-2)
+                    elif self.args.plot_fig == 2:
+                        # Save the attention map into dir
+                        for head in range(12):
+                            for batch in range(outputs[2][layer].shape[0]):
+                                if sep_indices[0].size == 1 or (sep_indices[0].size > 1 and sep_indices[0][0] != sep_indices[0][1]):
+                                    # One [SEP]
+                                    attention_map = outputs[2][layer][batch, head, :sep_indices[1][batch], :sep_indices[1][batch]]
+                                else:
+                                    attention_map = outputs[2][layer][batch, head, :sep_indices[1][batch * 2 + 1], :sep_indices[1][batch * 2 + 1]]
+                                np.save('/mnt/d/glue_results/attentions/' + self.args.attention_type + '/' + self.args.dataset_name + '/' + str(layer) + '_' + str(head) + '_' + str(batch) + '.npy', attention_map.numpy())
 
                 if has_labels:
                     step_eval_loss, logits = outputs[:2]
@@ -569,28 +581,28 @@ class Trainer:
                     else:
                         label_ids = np.append(label_ids, inputs["labels"].detach().cpu().numpy(), axis=0)
 
-        # Averaged over number of data and batch
-        avg_attentions_CLS /= count
-        avg_attentions_SEP /= count
-        attention_type = "effective"
-        dataset = 'QNLI'
-        torch.save(avg_attentions_CLS, '/mnt/c/Users/kaise/Desktop/researchData/' + dataset + '/' + attention_type + '_CLS_' + dataset + '.pt')
-        torch.save(avg_attentions_SEP, '/mnt/c/Users/kaise/Desktop/researchData/' + dataset + '/' + attention_type + 'SEP_' + dataset + '.pt')
-        plt.figure()
-        plt.imshow(avg_attentions_CLS.numpy(), vmin=0, vmax=1.0, cmap='Greens')
-        plt.colorbar()
-        plt.ylabel("Layer")
-        plt.xlabel("Head")
-        plt.title(attention_type + "[CLS]")
-        plt.savefig('/mnt/c/Users/kaise/Desktop/researchData/' + dataset + '/' + attention_type + '_CLS_' + dataset + '.png')
+        if self.args.plot_fig == 6:
+        ### Plotting for fig 6
+            # Averaged over number of data and batch
+            avg_attentions_CLS /= count
+            avg_attentions_SEP /= count
+            torch.save(avg_attentions_CLS, '/mnt/c/Users/kaise/Desktop/researchData/' + self.args.dataset_name + '/' + self.args.attention_type + '_CLS_' + self.args.dataset_name + '.pt')
+            torch.save(avg_attentions_SEP, '/mnt/c/Users/kaise/Desktop/researchData/' + self.args.dataset_name + '/' + self.args.attention_type + 'SEP_' + self.args.dataset_name + '.pt')
+            plt.figure()
+            plt.imshow(avg_attentions_CLS.numpy(), vmin=0, vmax=1.0, cmap='Greens')
+            plt.colorbar()
+            plt.ylabel("Layer")
+            plt.xlabel("Head")
+            plt.title(self.args.attention_type + "[CLS]")
+            plt.savefig('/mnt/c/Users/kaise/Desktop/researchData/' + self.args.dataset_name + '/' + self.args.attention_type + '_CLS_' + self.args.dataset_name + '.png')
 
-        plt.figure()
-        plt.imshow(avg_attentions_SEP.numpy(), vmin=0, vmax=1.0, cmap='Greens')
-        plt.title(attention_type + "[SEP]")
-        plt.ylabel("Layer")
-        plt.xlabel("Head")
-        plt.colorbar()
-        plt.savefig('/mnt/c/Users/kaise/Desktop/researchData/' + dataset + '/' + attention_type + '_SEP_' + dataset + '.png')
+            plt.figure()
+            plt.imshow(avg_attentions_SEP.numpy(), vmin=0, vmax=1.0, cmap='Greens')
+            plt.title(self.args.attention_type + "[SEP]")
+            plt.ylabel("Layer")
+            plt.xlabel("Head")
+            plt.colorbar()
+            plt.savefig('/mnt/c/Users/kaise/Desktop/researchData/' + self.args.dataset_name + '/' + self.args.attention_type + '_SEP_' + self.args.dataset_name + '.png')
 
         if self.compute_metrics is not None and preds is not None and label_ids is not None:
             metrics = self.compute_metrics(EvalPrediction(predictions=preds, label_ids=label_ids))

@@ -21,7 +21,7 @@ import logging
 import os
 from dataclasses import dataclass, field
 from typing import Dict, Optional
-
+import matplotlib.pyplot as plt
 import numpy as np
 
 from transformers import (
@@ -33,13 +33,15 @@ from transformers import (
     GlueDataTrainingArguments,
     HfArgumentParser,
     Trainer,
+    Trainer_two_attentions,
     TrainingArguments,
     glue_compute_metrics,
     glue_output_modes,
     glue_tasks_num_labels,
     set_seed,
 )
-
+import torch
+import pdb
 
 logger = logging.getLogger(__name__)
 
@@ -72,9 +74,6 @@ def main():
     parser = HfArgumentParser((ModelArguments, GlueDataTrainingArguments, TrainingArguments))
     # model_args, data_args, training_args = parser.parse_args_into_dataclasses()
     model_args, data_args, training_args, remaining_args = parser.parse_args_into_dataclasses(return_remaining_strings=True)
-    # Reading the attention type and k_values
-    attention_type = remaining_args[-3]
-    k_value = remaining_args[-1]
 
     if (
         os.path.exists(training_args.output_dir)
@@ -123,8 +122,12 @@ def main():
         finetuning_task=data_args.task_name,
         cache_dir=model_args.cache_dir,
     )
-    config.attention_type = attention_type
-    config.k_value = int(k_value)
+    config.attention_type = training_args.attention_type
+    config.k_value = -1
+    config.disable_head = False
+    config.layer_number = -1
+    config.head_number = -1
+
     tokenizer = AutoTokenizer.from_pretrained(
         model_args.tokenizer_name if model_args.tokenizer_name else model_args.model_name_or_path,
         cache_dir=model_args.cache_dir,
@@ -155,52 +158,165 @@ def main():
             preds = np.squeeze(p.predictions)
         return glue_compute_metrics(data_args.task_name, preds, p.label_ids)
 
-    # Initialize our Trainer
-    trainer = Trainer(
-        model=model,
-        args=training_args,
-        train_dataset=train_dataset,
-        eval_dataset=eval_dataset,
-        compute_metrics=compute_metrics,
-    )
-
-    # Training
-    if training_args.do_train:
-        trainer.train(
-            model_path=model_args.model_name_or_path if os.path.isdir(model_args.model_name_or_path) else None
+    if training_args.plot_fig == 6 or training_args.plot_fig == 2 or training_args.plot_fig == -1:
+        # Initialize our Trainer
+        trainer = Trainer(
+            model=model,
+            args=training_args,
+            train_dataset=train_dataset,
+            eval_dataset=eval_dataset,
+            compute_metrics=compute_metrics,
         )
-        trainer.save_model()
-        # For convenience, we also re-save the tokenizer to the same directory,
-        # so that you can share your model easily on huggingface.co/models =)
-        if trainer.is_world_master():
-            tokenizer.save_pretrained(training_args.output_dir)
 
-    # Evaluation
-    results = {}
-    if training_args.do_eval and training_args.local_rank in [-1, 0]:
-        logger.info("*** Evaluate ***")
-
-        # Loop to handle MNLI double evaluation (matched, mis-matched)
-        eval_datasets = [eval_dataset]
-        if data_args.task_name == "mnli":
-            mnli_mm_data_args = dataclasses.replace(data_args, task_name="mnli-mm")
-            eval_datasets.append(
-                GlueDataset(mnli_mm_data_args, tokenizer=tokenizer, local_rank=training_args.local_rank, evaluate=True)
+        # Training
+        if training_args.do_train:
+            trainer.train(
+                model_path=model_args.model_name_or_path if os.path.isdir(model_args.model_name_or_path) else None
             )
+            trainer.save_model()
+            # For convenience, we also re-save the tokenizer to the same directory,
+            # so that you can share your model easily on huggingface.co/models =)
+            if trainer.is_world_master():
+                tokenizer.save_pretrained(training_args.output_dir)
 
-        for eval_dataset in eval_datasets:
-            result = trainer.evaluate(eval_dataset=eval_dataset)
+        # Evaluation
+        results = {}
+        if training_args.do_eval and training_args.local_rank in [-1, 0]:
+            logger.info("*** Evaluate ***")
 
-            output_eval_file = os.path.join(
-                training_args.output_dir, f"eval_results_{eval_dataset.args.task_name}.txt"
-            )
-            with open(output_eval_file, "w") as writer:
-                logger.info("***** Eval results {} *****".format(eval_dataset.args.task_name))
-                for key, value in result.items():
-                    logger.info("  %s = %s", key, value)
-                    writer.write("%s = %s\n" % (key, value))
+            # Loop to handle MNLI double evaluation (matched, mis-matched)
+            eval_datasets = [eval_dataset]
+            if data_args.task_name == "mnli":
+                mnli_mm_data_args = dataclasses.replace(data_args, task_name="mnli-mm")
+                eval_datasets.append(
+                    GlueDataset(mnli_mm_data_args, tokenizer=tokenizer, local_rank=training_args.local_rank, evaluate=True)
+                )
 
-            results.update(result)
+            for eval_dataset in eval_datasets:
+                result = trainer.evaluate(eval_dataset=eval_dataset)
+
+                output_eval_file = os.path.join(
+                    training_args.output_dir, f"eval_results_{eval_dataset.args.task_name}.txt"
+                )
+                with open(output_eval_file, "w") as writer:
+                    logger.info("***** Eval results {} *****".format(eval_dataset.args.task_name))
+                    for key, value in result.items():
+                        logger.info("  %s = %s", key, value)
+                        writer.write("%s = %s\n" % (key, value))
+
+                results.update(result)
+                pdb.set_trace()
+    elif training_args.plot_fig == 5:
+        # Initialize our Trainer
+        pretrained_model = AutoModelForSequenceClassification.from_pretrained(
+            "bert-base-uncased",
+            from_tf=bool(".ckpt" in "bert-base-uncased"),
+            config=config,
+            cache_dir=model_args.cache_dir,
+        )
+
+        trainer = Trainer_two_attentions(
+            model_pretrained=pretrained_model,
+            model_finetuned=model,
+            args=training_args,
+            eval_dataset=eval_dataset,
+            compute_metrics=compute_metrics,
+        )
+
+        # Evaluation
+        results = {}
+        if training_args.do_eval and training_args.local_rank in [-1, 0]:
+            logger.info("*** Evaluate ***")
+
+            # Loop to handle MNLI double evaluation (matched, mis-matched)
+            eval_datasets = [eval_dataset]
+            if data_args.task_name == "mnli":
+                mnli_mm_data_args = dataclasses.replace(data_args, task_name="mnli-mm")
+                eval_datasets.append(
+                    GlueDataset(mnli_mm_data_args, tokenizer=tokenizer, local_rank=training_args.local_rank,
+                                evaluate=True)
+                )
+
+            for eval_dataset in eval_datasets:
+                result = trainer.evaluate(eval_dataset=eval_dataset)
+
+                output_eval_file = os.path.join(
+                    training_args.output_dir, f"eval_results_{eval_dataset.args.task_name}.txt"
+                )
+                with open(output_eval_file, "w") as writer:
+                    logger.info("***** Eval results {} *****".format(eval_dataset.args.task_name))
+                    for key, value in result.items():
+                        logger.info("  %s = %s", key, value)
+                        writer.write("%s = %s\n" % (key, value))
+
+                results.update(result)
+
+    elif training_args.plot_fig == 8:
+        # Repeat layer * head times
+        config.disable_head = True
+        perf = torch.zeros([12, 12], dtype=torch.float64)
+        for layer in range(12):
+            config.layer_number = layer
+            for head in range(12):
+                config.head_number = head
+
+                model = AutoModelForSequenceClassification.from_pretrained(
+                    model_args.model_name_or_path,
+                    from_tf=bool(".ckpt" in model_args.model_name_or_path),
+                    config=config,
+                    cache_dir=model_args.cache_dir,
+                )
+                # Initialize our Trainer
+                trainer = Trainer(
+                    model=model,
+                    args=training_args,
+                    train_dataset=train_dataset,
+                    eval_dataset=eval_dataset,
+                    compute_metrics=compute_metrics,
+                )
+
+                # Evaluation
+                results = {}
+                if training_args.do_eval and training_args.local_rank in [-1, 0]:
+                    logger.info("*** Evaluate ***")
+
+                    # Loop to handle MNLI double evaluation (matched, mis-matched)
+                    eval_datasets = [eval_dataset]
+                    if data_args.task_name == "mnli":
+                        mnli_mm_data_args = dataclasses.replace(data_args, task_name="mnli-mm")
+                        eval_datasets.append(
+                            GlueDataset(mnli_mm_data_args, tokenizer=tokenizer, local_rank=training_args.local_rank,
+                                        evaluate=True)
+                        )
+
+                    for eval_dataset in eval_datasets:
+                        result = trainer.evaluate(eval_dataset=eval_dataset)
+
+                        output_eval_file = os.path.join(
+                            training_args.output_dir, f"eval_results_{eval_dataset.args.task_name}.txt"
+                        )
+                        with open(output_eval_file, "w") as writer:
+                            logger.info("***** Eval results {} *****".format(eval_dataset.args.task_name))
+                            for key, value in result.items():
+                                logger.info("  %s = %s", key, value)
+                                writer.write("%s = %s\n" % (key, value))
+
+                        results.update(result)
+                if 'acc' in results.keys():
+                    perf[layer, head] = results['acc']
+                elif 'pearson' in results.keys():
+                    perf[layer, head] = results['pearson']
+                else:
+                    perf[layer, head] = results['loss']
+        plt.figure()
+        plt.imshow(perf.numpy(), vmin=torch.min(perf), vmax=torch.max(perf), cmap='Blues')
+        plt.colorbar()
+        plt.ylabel("Layer")
+        plt.xlabel("Head")
+        plt.title(training_args.dataset_name)
+        plt.savefig('/mnt/c/Users/kaise/Desktop/researchData/' + training_args.dataset_name + '/' + training_args.attention_type + "_" + training_args.dataset_name + '_disable_head.png')
+        np.save('/mnt/c/Users/kaise/Desktop/researchData/' + training_args.dataset_name + '/' + training_args.attention_type + "_" + training_args.dataset_name + '_disable_head.npy', perf)
+        pdb.set_trace()
 
     return results
 

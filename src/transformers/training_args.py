@@ -83,6 +83,11 @@ class TrainingArguments:
     )
     local_rank: int = field(default=-1, metadata={"help": "For distributed training: local_rank"})
 
+    ## Added for effective attention analysis
+    attention_type: str = field(default="standard", metadata={"help": "Either be standard or effective"})
+    dataset_name: str = field(default=None, metadata={"help": "Taskname for plotting"})
+    plot_fig: int = field(default=0, metadata={"help": "For plotting the analysis"})
+
     @property
     def train_batch_size(self) -> int:
         return self.per_gpu_train_batch_size * max(1, self.n_gpu)

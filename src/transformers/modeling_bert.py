@@ -28,7 +28,7 @@ from .activations import gelu, gelu_new, swish
 from .configuration_bert import BertConfig
 from .file_utils import add_start_docstrings, add_start_docstrings_to_callable
 from .modeling_utils import PreTrainedModel, prune_linear_layer
-
+import numpy as np
 import pdb
 
 logger = logging.getLogger(__name__)
@@ -201,11 +201,24 @@ class BertEffectiveSelfAttention(nn.Module):
 
         self.dropout = nn.Dropout(config.attention_probs_dropout_prob)
 
+        self.head_number = config.head_number
+
     def transpose_for_scores(self, x):
         new_x_shape = x.size()[:-1] + (self.num_attention_heads, self.attention_head_size)
         x = x.view(*new_x_shape)
         return x.permute(0, 2, 1, 3)
-    
+
+    def disable_head(self, attention_probs, sequence_lengths):
+        averaged_scores = 1 / sequence_lengths.double()
+        for batch in range(averaged_scores.shape[0]):
+            if self.head_number == -1:
+                # Disable layer
+                attention_probs[batch, :, :, :sequence_lengths[batch, 0, 0]] = averaged_scores[batch]
+            else:
+                attention_probs[batch, self.head_number, :, :sequence_lengths[batch, 0, 0]] = averaged_scores[batch]
+
+        return attention_probs
+
     def forward(
         self,
         hidden_states,
@@ -213,6 +226,7 @@ class BertEffectiveSelfAttention(nn.Module):
         head_mask=None,
         encoder_hidden_states=None,
         encoder_attention_mask=None,
+        do_disable=False,
     ):
         mixed_query_layer = self.query(hidden_states)
 
@@ -237,6 +251,11 @@ class BertEffectiveSelfAttention(nn.Module):
         if attention_mask is not None:
             # Apply the attention mask is (precomputed for all layers in BertModel forward() function)
             attention_scores = attention_scores + attention_mask
+            # Compute the sequence length for each batch
+            sequence_lengths = (attention_mask==0).sum(dim=3)
+            # sequence_lengths = torch.ones([query_layer.shape[0], 1, 1]) * 128
+        else:
+            sequence_lengths = torch.ones([query_layer.shape[0], 1, 1]) * 128
 
         # Normalize the attention scores to probabilities.
         attention_probs = nn.Softmax(dim=-1)(attention_scores) # Matrix A in the paper
@@ -257,7 +276,6 @@ class BertEffectiveSelfAttention(nn.Module):
         # Find the basis of LN(T), null_space dimension: [batch_size, hidden_size, hidden_size - rank], [d_s, d_s-r]
         basis_start_index = torch.max(torch.sum(S>bound, dtype=int, axis=2))
         null_space = U[:, :, :, basis_start_index:]
-        # TODO: Need to make sure if this is applicable to batches; Need to make sure the start_index is correct
         # Multiply attention with null_space, dimension: [batch_size, hidden_size, hidden_size - rank], [d_s, d_s-r]
         B = torch.matmul(attention_probs, null_space)
         # Transpose B [batch_size, hidden_size - rank, hidden_size]
@@ -273,113 +291,12 @@ class BertEffectiveSelfAttention(nn.Module):
         if head_mask is not None:
             effec_attention_probs = effec_attention_probs * head_mask
 
-        context_layer = torch.matmul(effec_attention_probs, value_layer) # value_layer: V in the paper
-
-        context_layer = context_layer.permute(0, 2, 1, 3).contiguous()
-        new_context_layer_shape = context_layer.size()[:-2] + (self.all_head_size,)
-        context_layer = context_layer.view(*new_context_layer_shape)
-
-        outputs = (context_layer, effec_attention_probs) if self.output_attentions else (context_layer,)
-        return outputs
-
-class BertEffectiveLinformerSelfAttention(nn.Module):
-    def __init__(self, config, E):
-        super().__init__()
-        # Check valid hidden size
-        if config.hidden_size % config.num_attention_heads != 0:
-            raise ValueError(
-                "The hidden size (%d) is not a multiple of the number of attention "
-                "heads (%d)" % (config.hidden_size, config.num_attention_heads)
-            )
-        self.output_attentions = config.output_attentions
-
-        self.num_attention_heads = config.num_attention_heads
-        self.attention_head_size = int(config.hidden_size / config.num_attention_heads)
-        self.all_head_size = self.num_attention_heads * self.attention_head_size
-        # Prepare to transform query, key, and value to all_head_size
-        self.query = nn.Linear(config.hidden_size, self.all_head_size)
-        self.key = nn.Linear(config.hidden_size, self.all_head_size)
-        self.value = nn.Linear(config.hidden_size, self.all_head_size)
-        self.E = E
-        # If k = d, use svd, or else the nullity is 0
-        self.use_SVD = (self.attention_head_size != int(config.k_value))
-        self.dropout = nn.Dropout(config.attention_probs_dropout_prob)
-
-    def transpose_for_scores(self, x):
-        new_x_shape = x.size()[:-1] + (self.num_attention_heads, self.attention_head_size)
-        x = x.view(*new_x_shape)
-        return x.permute(0, 2, 1, 3)
-    
-    def forward(
-        self,
-        hidden_states,
-        attention_mask=None,
-        head_mask=None,
-        encoder_hidden_states=None,
-        encoder_attention_mask=None,
-    ):
-        mixed_query_layer = self.query(hidden_states)
-
-        # If this is instantiated as a cross-attention module, the keys
-        # and values come from an encoder; the attention mask needs to be
-        # such that the encoder's padding tokens are not attended to.
-        if encoder_hidden_states is not None:
-            mixed_key_layer = self.key(encoder_hidden_states)
-            # This is for linformer
-            mixed_value_layer = self.value(encoder_hidden_states)
-            attention_mask = encoder_attention_mask
-        else:
-            mixed_key_layer = self.key(hidden_states)
-            mixed_value_layer = self.value(hidden_states)
-        mixed_key_layer = torch.transpose(self.E(torch.transpose(mixed_key_layer, -1, -2)), -1, -2)
-        mixed_value_layer = torch.transpose(self.E(torch.transpose(mixed_value_layer, -1, -2)), -1, -2)
-        pdb.set_trace()
-
-        query_layer = self.transpose_for_scores(mixed_query_layer)
-        key_layer = self.transpose_for_scores(mixed_key_layer)
-        value_layer = self.transpose_for_scores(mixed_value_layer)
-        # Take the dot product between "query" and "key" to get the raw attention scores.
-        attention_scores = torch.matmul(query_layer, key_layer.transpose(-1, -2))
-        attention_scores = attention_scores / math.sqrt(self.attention_head_size)
-        if attention_mask is not None:
-            # Apply the attention mask is (precomputed for all layers in BertModel forward() function)
-            attention_scores = attention_scores + attention_mask[:, :, :, :self.E.weight.shape[0]]
-        # Normalize the attention scores to probabilities.
-        attention_probs = nn.Softmax(dim=-1)(attention_scores) # Matrix A in the paper
-
-        # This is actually dropping out entire tokens to attend to, which might
-        # seem a bit unusual, but is taken from the original Transformer paper.
-        attention_probs = self.dropout(attention_probs)
-
-        if self.use_SVD:
-            ### Here, effective attention begins
-            ## Calculate Project_(LN(T))(A)
-            # Compute T
-            T = value_layer
-            # Make a SVD of T, U(dimension: [batch_size, hidden_size, hidden_size], [d_s, d_s]
-            # S(dimension: square, and is of min(hidden_size, all_head_size), min(d_s, d))
-            U, S, V = torch.Tensor.svd(T, some=False, compute_uv=True)
-            # Find the bound of S, when S value less than bound, we treat it as a 0
-            bound = torch.finfo(S.dtype).eps * max(U.shape[1], V.shape[1])
-            # Find the basis of LN(T), null_space dimension: [batch_size, hidden_size, hidden_size - rank], [d_s, d_s-r]
-            basis_start_index = torch.max(torch.sum(S>bound, dtype=int, axis=2))
-            null_space = U[:, :, :, basis_start_index:]
-            # Multiply attention with null_space, dimension: [batch_size, hidden_size, hidden_size - rank], [d_s, d_s-r]
-            B = torch.matmul(attention_probs, null_space)
-            # Transpose B [batch_size, hidden_size - rank, hidden_size]
-            transpose_B = torch.transpose(B, -1, -2)
-            # Multiply null_space and transposed B [batch_size, hidden_size, hiddensize]
-            projection_attention = torch.matmul(null_space, transpose_B)
-            # Then do tranpose for projection of LN(T)
-            projection_attention = torch.transpose(projection_attention, -1, -2)
-            # Compute the effective attention
-            effec_attention_probs = torch.sub(attention_probs, projection_attention)
-        else:
-            effec_attention_probs = attention_probs
-
-        # Mask heads if we want to
-        if head_mask is not None:
-            effec_attention_probs = effec_attention_probs * head_mask
+        # Mask the attention
+        new_mask = torch.from_numpy(np.where(attention_mask.numpy() == 0, 1, 0))
+        effec_attention_probs *= new_mask
+        # Disable the head
+        if do_disable:
+            effec_attention_probs = self.disable_head(effec_attention_probs, sequence_lengths)
         context_layer = torch.matmul(effec_attention_probs, value_layer) # value_layer: V in the paper
 
         context_layer = context_layer.permute(0, 2, 1, 3).contiguous()
@@ -408,11 +325,23 @@ class BertSelfAttention(nn.Module):
         self.value = nn.Linear(config.hidden_size, self.all_head_size)
 
         self.dropout = nn.Dropout(config.attention_probs_dropout_prob)
+        self.head_number = config.head_number
 
     def transpose_for_scores(self, x):
         new_x_shape = x.size()[:-1] + (self.num_attention_heads, self.attention_head_size)
         x = x.view(*new_x_shape)
         return x.permute(0, 2, 1, 3)
+
+    def disable_head(self, attention_probs, sequence_lengths):
+        averaged_scores = 1 / sequence_lengths.double()
+        for batch in range(averaged_scores.shape[0]):
+            if self.head_number == -1:
+                # Disable layer
+                attention_probs[batch, :, :, :sequence_lengths[batch, 0, 0]] = averaged_scores[batch]
+            else:
+                attention_probs[batch, self.head_number, :, :sequence_lengths[batch, 0, 0]] = averaged_scores[batch]
+
+        return attention_probs
 
     def forward(
         self,
@@ -421,6 +350,7 @@ class BertSelfAttention(nn.Module):
         head_mask=None,
         encoder_hidden_states=None,
         encoder_attention_mask=None,
+        do_disable=False,
     ):
         mixed_query_layer = self.query(hidden_states)
 
@@ -444,7 +374,10 @@ class BertSelfAttention(nn.Module):
         attention_scores = attention_scores / math.sqrt(self.attention_head_size)
         if attention_mask is not None:
             # Apply the attention mask is (precomputed for all layers in BertModel forward() function)
+            sequence_lengths = (attention_mask==0).sum(dim=3)
             attention_scores = attention_scores + attention_mask
+        else:
+            sequence_lengths = torch.ones([query_layer.shape[0], 1, 1]) * 128
 
         # Normalize the attention scores to probabilities.
         attention_probs = nn.Softmax(dim=-1)(attention_scores)
@@ -456,6 +389,8 @@ class BertSelfAttention(nn.Module):
         # Mask heads if we want to
         if head_mask is not None:
             attention_probs = attention_probs * head_mask
+        if do_disable:
+            attention_probs = self.disable_head(attention_probs, sequence_lengths)
 
         context_layer = torch.matmul(attention_probs, value_layer)
 
@@ -487,16 +422,14 @@ class BertAttention(nn.Module):
     #     self.self = BertEffectiveSelfAttention(config)
     #     self.output = BertSelfOutput(config)
     #     self.pruned_heads = set()
-    def __init__(self, config, E):
+    def __init__(self, config):
         super().__init__()
         if config.attention_type == 'standard':
             self.self = BertSelfAttention(config)
         elif config.attention_type == 'effective':
             self.self = BertEffectiveSelfAttention(config)
-        elif config.attention_type == 'linformer':
-            self.self = BertEffectiveLinformerSelfAttention(config, E)
         else:
-            raise ValueError('Only standard or effective or effective linformer attention are supported. But you input ', config.attention_type)
+            raise ValueError('Only standard or effective attention are supported. But you input ', config.attention_type)
         self.output = BertSelfOutput(config)
         self.pruned_heads = set()
 
@@ -530,9 +463,10 @@ class BertAttention(nn.Module):
         head_mask=None,
         encoder_hidden_states=None,
         encoder_attention_mask=None,
+        do_disable=False,
     ):
         self_outputs = self.self(
-            hidden_states, attention_mask, head_mask, encoder_hidden_states, encoder_attention_mask
+            hidden_states, attention_mask, head_mask, encoder_hidden_states, encoder_attention_mask, do_disable
         )
         attention_output = self.output(self_outputs[0], hidden_states)
         outputs = (attention_output,) + self_outputs[1:]  # add attentions if we output them
@@ -569,12 +503,12 @@ class BertOutput(nn.Module):
 
 
 class BertLayer(nn.Module):
-    def __init__(self, config, E):
+    def __init__(self, config):
         super().__init__()
-        self.attention = BertAttention(config, E)
+        self.attention = BertAttention(config)
         self.is_decoder = config.is_decoder
         if self.is_decoder:
-            self.crossattention = BertAttention(config, E)
+            self.crossattention = BertAttention(config)
         self.intermediate = BertIntermediate(config)
         self.output = BertOutput(config)
 
@@ -585,20 +519,20 @@ class BertLayer(nn.Module):
         head_mask=None,
         encoder_hidden_states=None,
         encoder_attention_mask=None,
+        do_disable=False,
     ):
-        self_attention_outputs = self.attention(hidden_states, attention_mask, head_mask)
+        self_attention_outputs = self.attention(hidden_states, attention_mask, head_mask, do_disable=do_disable)
         attention_output = self_attention_outputs[0]
         outputs = self_attention_outputs[1:]  # add self attentions if we output attention weights
 
         if self.is_decoder and encoder_hidden_states is not None:
             cross_attention_outputs = self.crossattention(
-                attention_output, attention_mask, head_mask, encoder_hidden_states, encoder_attention_mask
+                attention_output, attention_mask, head_mask, encoder_hidden_states, encoder_attention_mask, do_disable
             )
             attention_output = cross_attention_outputs[0]
             outputs = outputs + cross_attention_outputs[1:]  # add cross attentions if we output attention weights
 
         intermediate_output = self.intermediate(attention_output)
-        # pdb.set_trace()
         layer_output = self.output(intermediate_output, attention_output)
         outputs = (layer_output,) + outputs
         return outputs
@@ -609,14 +543,9 @@ class BertEncoder(nn.Module):
         super().__init__()
         self.output_attentions = config.output_attentions
         self.output_hidden_states = config.output_hidden_states
-        # TODO: Initialize matrix E for linformer
-        if (int(config.k_value) == -1):
-            config.k_value = int(config.hidden_size / config.num_attention_heads)
-        # Here, the value is the max_sequence_length
-        # TODO: Improve it
-        self.E = nn.Linear(128, int(config.k_value))
-        self.layer = nn.ModuleList([BertLayer(config, self.E) for _ in range(config.num_hidden_layers)])
-        
+        self.layer = nn.ModuleList([BertLayer(config) for _ in range(config.num_hidden_layers)])
+        self.do_disable = config.disable_head
+        self.layer_number = config.layer_number
 
     def forward(
         self,
@@ -629,17 +558,24 @@ class BertEncoder(nn.Module):
         all_hidden_states = ()
         all_attentions = ()
         for i, layer_module in enumerate(self.layer):
+            if i == self.layer_number and self.do_disable:
+                do_disable = True
+            else:
+                do_disable = False
+
             if self.output_hidden_states:
                 all_hidden_states = all_hidden_states + (hidden_states,)
 
+            # if i == self.layer_num:
+            #     layer_module.disable_head(self.head_num)
+
             layer_outputs = layer_module(
-                hidden_states, attention_mask, head_mask[i], encoder_hidden_states, encoder_attention_mask
+                hidden_states, attention_mask, head_mask[i], encoder_hidden_states, encoder_attention_mask, do_disable
             )
             hidden_states = layer_outputs[0]
 
             if self.output_attentions:
                 all_attentions = all_attentions + (layer_outputs[1],)
-
         # Add last layer
         if self.output_hidden_states:
             all_hidden_states = all_hidden_states + (hidden_states,)
@@ -830,7 +766,7 @@ class BertModel(BertPreTrainedModel):
     def __init__(self, config):
         super().__init__(config)
         self.config = config
-
+        config.output_attentions = True
         self.embeddings = BertEmbeddings(config)
         self.encoder = BertEncoder(config)
         self.pooler = BertPooler(config)
